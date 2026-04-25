@@ -1,9 +1,14 @@
 import os
 import httpx
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pymongo import MongoClient
+from pymongo.collection import Collection
 from pydantic import BaseModel
 
 # load environmental variable
@@ -12,7 +17,32 @@ rapid_api_key = os.getenv("RAPIDAPI_KEY")
 if rapid_api_key == "":
     raise ValueError("Rapid API Key is missing! Please check if key is set in .env or environmental variables of platform settings.")
 
-app = FastAPI()
+mongo_connection_string = os.getenv("MONGO_DB_CONNECTION_STRING")
+if not mongo_connection_string:
+    raise ValueError("MongoDB connection string is missing! Please set MONGO_DB_CONNECTION_STRING in .env or environment variables.")
+
+mongo_database_name = os.getenv("MONGO_DB_NAME", "Staging")
+mongo_collection_name = os.getenv("MONGO_DB_COLLECTION", "ig_store")
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    mongo_client = MongoClient(mongo_connection_string, serverSelectionTimeoutMS=5000)
+    mongo_db = mongo_client[mongo_database_name]
+    stores_collection = mongo_db[mongo_collection_name]
+
+    # Connection check should fail fast on startup if db is not reachable.
+    mongo_client.admin.command("ping")
+    seeded_count = seed_dummy_store_items_once(stores_collection, mongo_db["seed_meta"])
+    print(f"MongoDB connected successfully. Initial seed inserted {seeded_count} record(s).")
+
+    application.state.mongo_client = mongo_client
+    application.state.stores_collection = stores_collection
+    yield
+    mongo_client.close()
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -63,13 +93,54 @@ STORE_ITEMS: list[StoreItemDto] = [
 ]
 
 
+def seed_dummy_store_items_once(stores_collection: Collection[Any], seed_meta_collection: Collection[Any]) -> int:
+    """
+    One-time startup seed for local testing.
+    Keep this logic isolated so it can be removed quickly later.
+    """
+    seed_key = "store_items_seed_v1"
+    if seed_meta_collection.find_one({"_id": seed_key}) is not None:
+        return 0
+
+    inserted_count = 0
+    for item in STORE_ITEMS:
+        result = stores_collection.update_one(
+            {"id": item.id},
+            {"$setOnInsert": item.model_dump()},
+            upsert=True,
+        )
+        if result.upserted_id is not None:
+            inserted_count += 1
+
+    seed_meta_collection.insert_one(
+        {
+            "_id": seed_key,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "insertedCount": inserted_count,
+        }
+    )
+    return inserted_count
+
+
 @app.get("/stores", response_model=list[StoreItemDto])
 async def get_store_items(skip: int = 0, limit: int = 0) -> list[StoreItemDto]:
     start_index = max(skip, 0)
-    if limit <= 0:
-        return STORE_ITEMS[start_index:]
-    end_index = start_index + limit
-    return STORE_ITEMS[start_index:end_index]
+    stores_collection: Collection[Any] = app.state.stores_collection
+
+    cursor = stores_collection.find({}, {"_id": 0})
+    cursor = cursor.skip(start_index)
+    if limit > 0:
+        cursor = cursor.limit(limit)
+
+    records = list(cursor)
+    return [StoreItemDto(**record) for record in records]
+
+
+@app.get("/health/db")
+async def database_health_check() -> dict[str, str]:
+    mongo_client: MongoClient = app.state.mongo_client
+    mongo_client.admin.command("ping")
+    return {"status": "ok"}
 
 
 @app.get("/profile/{page_name}")
