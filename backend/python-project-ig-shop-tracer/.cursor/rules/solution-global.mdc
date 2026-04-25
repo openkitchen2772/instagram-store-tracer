@@ -1,0 +1,22 @@
+---
+description: Solution global standards that always apply across this workspace
+alwaysApply: true
+---
+
+# Solution Structure
+
+This solution consists of 2 projects to build a instagram store tracer app:
+
+1. Front-end: /nextjs-project-ig-shop-tracer folder and files (NextJS/Typescript) 
+2. Back-end:  /python-project-ig-shop-tracer folder and files (FastAPI/Python)
+
+# Workspace Core Rule
+
+Follow these standards for any task in this workspace:
+
+- Read and follow `AGENTS.md` and `CLAUDE.md` before making substantial changes.
+- Prefer minimal, focused edits that match existing project style and structure.
+- Do not introduce breaking API or behavioral changes unless explicitly requested.
+- Validate changes with relevant checks (`npm run lint`, targeted tests, or build checks) when possible.
+- If requirements are unclear, ask one concise clarifying question before implementing.
+

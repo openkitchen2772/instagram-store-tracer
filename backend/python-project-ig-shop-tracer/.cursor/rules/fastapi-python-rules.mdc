@@ -1,0 +1,29 @@
+---
+description: Rules for backend FastAPI server and python code
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Python Code
+
+- Add type annotations for function parameters and return values.
+- Ensure type annotations so fastAPI data validation can work on route parameters and data.
+- Type class attributes where practical.
+- Prefer concrete and readable types from `typing` when needed.
+- Avoid introducing untyped new functions unless explicitly requested.
+
+# FastAPI API interface
+- Use JSON to communicate between front-end and back-end
+- Make DTO for reusable objects or entities and for Pydantic data validation
+
+Example:
+
+```python
+# Avoid
+def get_user(id):
+    return {"id": id}
+
+# Preferred
+def get_user(user_id: int) -> dict[str, int]:
+    return {"id": user_id}
+```
