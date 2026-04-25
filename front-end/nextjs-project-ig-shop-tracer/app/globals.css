@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  margin: 0;
+}
+
+.app-title {
+  font-family: var(--font-title), var(--font-sans), sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  background: linear-gradient(90deg, #f58529 0%, #dd2a7b 35%, #8134af 68%, #515bd4 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.storebook-scroll {
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+}
+
+.storebook-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.storebook-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.storebook-scroll::-webkit-scrollbar-button:single-button,
+.storebook-scroll::-webkit-scrollbar-button:vertical:decrement,
+.storebook-scroll::-webkit-scrollbar-button:vertical:increment,
+.storebook-scroll::-webkit-scrollbar-button:horizontal:decrement,
+.storebook-scroll::-webkit-scrollbar-button:horizontal:increment {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+.storebook-scroll::-webkit-scrollbar-corner {
+  display: none;
+}
