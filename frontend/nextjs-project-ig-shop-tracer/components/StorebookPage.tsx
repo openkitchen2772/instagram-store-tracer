@@ -1,155 +1,75 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import StoreCard, { type StoreItem } from "@/components/StoreCard";
+/**
+ * StorebookPage
+ *
+ * Top-level orchestration component for the storebook route. It owns only
+ * page-level concerns:
+ *
+ *   - Page chrome (background gradient, `TopBar`, rounded content section).
+ *   - Local UI state that spans children (`viewMode`, `searchQuery`).
+ *   - Wiring the reusable hooks (`useStores`, `useCustomScrollbar`,
+ *     `useSubmitMessages`) to the dedicated child components
+ *     (`StoreListView`, `CustomScrollbar`, `FloatingStoreSubmitter`,
+ *     `SubmitMessageStack`).
+ *
+ * Feature-specific logic (data fetching, floating FAB state, toast queue,
+ * scrollbar metrics) lives in the respective hooks/components so this file
+ * stays focused on composition.
+ */
+
+import { useMemo, useRef, useState } from "react";
+import CustomScrollbar from "@/components/common/CustomScrollbar";
 import StorebookHeader, { type ViewMode } from "@/components/StorebookHeader";
 import TopBar from "@/components/TopBar";
+import FloatingStoreSubmitter from "@/components/storebook/FloatingStoreSubmitter";
+import StoreListView from "@/components/storebook/StoreListView";
+import SubmitMessageStack from "@/components/storebook/SubmitMessageStack";
+import { useCustomScrollbar } from "@/hooks/useCustomScrollbar";
+import { useStores } from "@/hooks/useStores";
+import { useSubmitMessages } from "@/hooks/useSubmitMessages";
 
 type StorebookPageProps = {
   sessionUuid: string;
 };
 
+// Padding (px) between the storebook section edges and the custom scrollbar
+// track. The same value is reused for both the top and bottom so the overlay
+// is visually centered within the rounded container.
+const SCROLLBAR_EDGE_PADDING = 10;
+
 export default function StorebookPage({ sessionUuid }: StorebookPageProps) {
-  const SCROLLBAR_EDGE_PADDING = 10;
-  const STORE_API_URL = "http://localhost:8000/stores";
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [stores, setStores] = useState<StoreItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isLoadingStores, setIsLoadingStores] = useState(true);
-  const [storesError, setStoresError] = useState<string | null>(null);
-  const [isScrolling, setIsScrolling] = useState(false);
-  const [thumbHeight, setThumbHeight] = useState(0);
-  const [thumbOffset, setThumbOffset] = useState(0);
-  const [showCustomScrollbar, setShowCustomScrollbar] = useState(false);
-  const [headerHeight, setHeaderHeight] = useState(0);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // The page owns the refs for both the scroll container and the sticky
+  // StorebookHeader; they are handed to `useCustomScrollbar` as inputs so the
+  // hook stays ignorant of page-specific layout concerns.
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
+
+  const { stores, isLoading, error, submitStore } = useStores();
+  const scrollbar = useCustomScrollbar({
+    containerRef: scrollContainerRef,
+    topInsetRef: headerRef,
+    edgePadding: SCROLLBAR_EDGE_PADDING,
+  });
+  const { messages, showMessage } = useSubmitMessages();
 
   const filteredStores = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
     if (!normalizedQuery) {
       return stores;
     }
-
     return stores.filter((item) =>
       item.name.toLowerCase().includes(normalizedQuery),
     );
   }, [searchQuery, stores]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const fetchStores = async () => {
-      setIsLoadingStores(true);
-      setStoresError(null);
-
-      try {
-        const response = await fetch(STORE_API_URL, {
-          method: "GET",
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch stores (HTTP ${response.status})`);
-        }
-
-        const payload = (await response.json()) as StoreItem[];
-        setStores(payload);
-      } catch (error) {
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        const message =
-          error instanceof Error ? error.message : "Failed to fetch stores";
-        setStoresError(message);
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsLoadingStores(false);
-        }
-      }
-    };
-
-    fetchStores();
-
-    return () => {
-      controller.abort();
-    };
-  }, [STORE_API_URL]);
-
-  useEffect(() => {
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const updateScrollbarMetrics = useCallback(() => {
-    const element = scrollContainerRef.current;
-    if (!element) return;
-
-    const { clientHeight, scrollHeight, scrollTop } = element;
-    const hasOverflow = scrollHeight > clientHeight + 1;
-    setShowCustomScrollbar(hasOverflow);
-
-    if (!hasOverflow) {
-      setThumbHeight(0);
-      setThumbOffset(0);
-      return;
-    }
-
-    const trackTop = SCROLLBAR_EDGE_PADDING + headerHeight;
-    const trackBottom = SCROLLBAR_EDGE_PADDING;
-    const trackHeight = Math.max(clientHeight - trackTop - trackBottom, 1);
-    const nextThumbHeight = Math.max((clientHeight / scrollHeight) * trackHeight, 40);
-    const travel = Math.max(trackHeight - nextThumbHeight, 0);
-    const maxScrollTop = Math.max(scrollHeight - clientHeight, 1);
-    const nextThumbOffset = (scrollTop / maxScrollTop) * travel;
-
-    setThumbHeight(nextThumbHeight);
-    setThumbOffset(nextThumbOffset);
-  }, [SCROLLBAR_EDGE_PADDING, headerHeight]);
-
-  useEffect(() => {
-    const updateHeaderHeight = () => {
-      setHeaderHeight(headerRef.current?.offsetHeight ?? 0);
-    };
-
-    updateHeaderHeight();
-    updateScrollbarMetrics();
-
-    const element = scrollContainerRef.current;
-    if (!element) return;
-
-    const resizeObserver = new ResizeObserver(() => {
-      updateHeaderHeight();
-      updateScrollbarMetrics();
-    });
-    resizeObserver.observe(element);
-    if (headerRef.current) {
-      resizeObserver.observe(headerRef.current);
-    }
-    window.addEventListener("resize", updateScrollbarMetrics);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", updateScrollbarMetrics);
-    };
-  }, [filteredStores, viewMode, updateScrollbarMetrics]);
-
-  const handleStorebookScroll = () => {
-    updateScrollbarMetrics();
-    setIsScrolling(true);
-
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
-
-    scrollTimeoutRef.current = setTimeout(() => {
-      setIsScrolling(false);
-    }, 850);
+  const handleSubmitStore = async (storeName: string): Promise<boolean> => {
+    const result = await submitStore(storeName);
+    showMessage(result.ok ? "Store submitted" : "Unable to submit store");
+    return result.ok;
   };
 
   return (
@@ -161,9 +81,9 @@ export default function StorebookPage({ sessionUuid }: StorebookPageProps) {
           <div
             ref={scrollContainerRef}
             className={`storebook-scroll h-full overflow-x-hidden overflow-y-auto overscroll-contain ${
-              isScrolling ? "scrollbar-visible" : ""
+              scrollbar.isScrolling ? "scrollbar-visible" : ""
             }`}
-            onScroll={handleStorebookScroll}
+            onScroll={scrollbar.onScroll}
           >
             <StorebookHeader
               viewMode={viewMode}
@@ -172,68 +92,28 @@ export default function StorebookPage({ sessionUuid }: StorebookPageProps) {
               onSearchChange={setSearchQuery}
               containerRef={headerRef}
             />
-
-            <div className="px-4 pb-5 pt-2 sm:px-6 sm:pb-6">
-              {isLoadingStores ? (
-                <p className="rounded-2xl bg-zinc-50 px-4 py-6 text-sm text-zinc-600 ring-1 ring-zinc-200">
-                  Loading stores...
-                </p>
-              ) : null}
-              {storesError ? (
-                <p className="mt-3 rounded-2xl bg-red-50 px-4 py-6 text-sm text-red-700 ring-1 ring-red-200">
-                  Unable to load stores. {storesError}
-                </p>
-              ) : null}
-              {viewMode === "grid" ? (
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
-                  {filteredStores.map((item) => (
-                    <StoreCard key={item.id} item={item} />
-                  ))}
-                </div>
-              ) : (
-                <div
-                  className="rounded-2xl bg-zinc-50 p-5 text-zinc-700 ring-1 ring-zinc-200"
-                  role="region"
-                  aria-label="Map view"
-                >
-                  <h2 className="text-lg font-semibold text-zinc-900">Store Map View</h2>
-                  <p className="pt-1 text-sm text-zinc-600">
-                    Basic map placeholder with store coordinates.
-                  </p>
-                  <ul className="mt-4 grid gap-2 text-sm">
-                    {filteredStores.map((item) => (
-                      <li
-                        key={item.id}
-                        className="rounded-xl bg-white px-3 py-2 ring-1 ring-zinc-200"
-                      >
-                        {item.name}: ({item.latitude}, {item.longitude})
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
+            <StoreListView
+              viewMode={viewMode}
+              stores={filteredStores}
+              isLoading={isLoading}
+              error={error}
+            />
           </div>
 
-          {showCustomScrollbar ? (
-            <div
-              className={`pointer-events-none absolute bottom-[10px] right-[4px] top-[10px] w-[8px] rounded-full bg-zinc-200/30 transition-opacity duration-300 ${
-                isScrolling ? "opacity-100" : "opacity-0"
-              }`}
-              style={{ top: `${headerHeight + SCROLLBAR_EDGE_PADDING}px` }}
-              aria-hidden="true"
-            >
-              <div
-                className="absolute left-0 w-full rounded-full bg-zinc-500/60 transition-[transform,opacity] duration-300"
-                style={{
-                  height: `${thumbHeight}px`,
-                  transform: `translateY(${thumbOffset}px)`,
-                }}
-              />
-            </div>
-          ) : null}
+          <CustomScrollbar
+            show={scrollbar.showScrollbar}
+            isActive={scrollbar.isScrolling}
+            thumbHeight={scrollbar.thumbHeight}
+            thumbOffset={scrollbar.thumbOffset}
+            topOffset={scrollbar.topInset + SCROLLBAR_EDGE_PADDING}
+            bottomOffset={SCROLLBAR_EDGE_PADDING}
+          />
         </section>
       </div>
+
+      <FloatingStoreSubmitter onSubmit={handleSubmitStore}>
+        <SubmitMessageStack messages={messages} />
+      </FloatingStoreSubmitter>
     </main>
   );
 }
