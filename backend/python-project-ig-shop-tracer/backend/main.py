@@ -1,4 +1,5 @@
 import os
+import logging
 import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pydantic import BaseModel
+from instagram_store_db_service import insert_store_profile_if_absent
 
 # load environmental variable
 load_dotenv()  # load env_var for local dev environment, do nothing for prod env
@@ -23,6 +25,7 @@ if not mongo_connection_string:
 
 mongo_database_name = os.getenv("MONGO_DB_NAME", "Staging")
 mongo_collection_name = os.getenv("MONGO_DB_COLLECTION", "ig_store")
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -75,6 +78,69 @@ class StoreItemDto(BaseModel):
     imageUrl: str
     latitude: float
     longitude: float
+
+
+class InstagramStoreLookupRequest(BaseModel):
+    username: str
+
+
+# Data Interface Models
+class StoreProfileDto(BaseModel):
+    id: str = ""
+    full_name: str = ""
+    biography: str = ""
+    hd_profile_pic_url: str = ""
+    contact_phone_number: str = ""
+    public_email: str = ""
+    city_name: str = ""
+    latitude: Any = ""
+    longitude: Any = ""
+
+    def update_from_source_profile(self, source_profile: dict[str, Any]) -> None:
+        hd_profile_pic_url_info = source_profile.get("hd_profile_pic_url_info")
+        hd_profile_pic_url = ""
+        if isinstance(hd_profile_pic_url_info, dict):
+            hd_profile_pic_url = str(hd_profile_pic_url_info.get("url", ""))
+
+        self.id = str(source_profile.get("id", "") or "")
+        self.full_name = str(source_profile.get("full_name", "") or "")
+        self.biography = str(source_profile.get("biography", "") or "")
+        self.hd_profile_pic_url = hd_profile_pic_url
+        self.contact_phone_number = str(source_profile.get("contact_phone_number", "") or "")
+        self.public_email = str(source_profile.get("public_email", "") or "")
+        self.city_name = str(source_profile.get("city_name", "") or "")
+        self.latitude = source_profile.get("latitude", "")
+        self.longitude = source_profile.get("longitude", "")
+
+
+class StoreLookupResponseDto(BaseModel):
+    payload: dict[str, str]
+    success: bool
+    message: str
+    data: StoreProfileDto | None = None
+
+
+def to_store_item_dto(profile: StoreProfileDto) -> StoreItemDto:
+    latitude_value = profile.latitude
+    longitude_value = profile.longitude
+
+    try:
+        latitude = float(latitude_value)
+    except (TypeError, ValueError):
+        latitude = 0.0
+
+    try:
+        longitude = float(longitude_value)
+    except (TypeError, ValueError):
+        longitude = 0.0
+
+    return StoreItemDto(
+        id=profile.id,
+        name=profile.full_name or profile.id,
+        imageUrl=profile.hd_profile_pic_url,
+        latitude=latitude,
+        longitude=longitude,
+    )
 
 
 STORE_ITEMS: list[StoreItemDto] = [
@@ -133,7 +199,12 @@ async def get_store_items(skip: int = 0, limit: int = 0) -> list[StoreItemDto]:
         cursor = cursor.limit(limit)
 
     records = list(cursor)
-    return [StoreItemDto(**record) for record in records]
+    mapped_items: list[StoreItemDto] = []
+    for record in records:
+        source_record = dict(record)
+        source_record.pop("_id", None)
+        mapped_items.append(to_store_item_dto(StoreProfileDto(**source_record)))
+    return mapped_items
 
 
 @app.get("/health/db")
@@ -145,15 +216,94 @@ async def database_health_check() -> dict[str, str]:
 
 @app.get("/profile/{page_name}")
 async def get_page_profile(page_name: str):
+    result, _ = await request_rapid_api_profile(page_name)
+    return result
+
+
+async def request_rapid_api_profile(page_name: str) -> tuple[dict[str, Any] | None, str | None]:
     url = INSTAGRAM_RAPID_API["post_user_info"]["url"]
     headers = INSTAGRAM_RAPID_API_HEADERS
-    payloads = {
-        "username": page_name
-    }
+    request_payload = {"username": page_name}
 
-    result = {}
-    client: httpx.AsyncClient
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payloads, headers=headers)
-        result = response.json()
-    return result
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=request_payload, headers=headers)
+            response.raise_for_status()
+            api_result = response.json()
+            if not isinstance(api_result, dict):
+                return None, "Instagram store lookup failed: API returned an unsupported response format."
+            return api_result, None
+    except httpx.HTTPStatusError as error:
+        return None, f"Instagram store lookup failed: external API returned HTTP {error.response.status_code}."
+    except httpx.HTTPError:
+        return None, "Instagram store lookup failed: unable to reach external API."
+    except ValueError:
+        return None, "Instagram store lookup failed: API returned invalid JSON."
+
+
+@app.post("/add_store")
+async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookupResponseDto:
+    page_name = payload.username.strip()
+    response_payload = {"query_store_name": page_name}
+
+    if page_name == "":
+        return StoreLookupResponseDto(
+            payload=response_payload,
+            success=False,
+            message="Instagram store lookup rejected: username is required. Provide a valid Instagram username and try again.",
+        )
+
+    result, error_message = await request_rapid_api_profile(page_name)
+    if result is None:
+        return StoreLookupResponseDto(
+            payload=response_payload,
+            success=False,
+            message=error_message or "Instagram store lookup failed: unknown error.",
+        )
+
+    source_profile: dict[str, Any] = result
+    result_container = result.get("result")
+    if isinstance(result_container, list) and len(result_container) > 0 and isinstance(result_container[0], dict):
+        candidate_user = result_container[0].get("user")
+        if isinstance(candidate_user, dict):
+            source_profile = candidate_user
+        else:
+            source_profile = result_container[0]
+    elif isinstance(result_container, dict):
+        candidate_user = result_container.get("user")
+        if isinstance(candidate_user, dict):
+            source_profile = candidate_user
+        else:
+            source_profile = result_container
+
+    mapped_profile = StoreProfileDto()
+    mapped_profile.update_from_source_profile(source_profile)
+
+    if mapped_profile.id == "":
+        return StoreLookupResponseDto(
+            payload=response_payload,
+            success=False,
+            message="Instagram store lookup completed but no usable profile was found. Verify the username and ensure the account is accessible.",
+        )
+
+    stores_collection: Collection[Any] = app.state.stores_collection
+    operation_success_message = "Instagram store lookup successful. Profile data was retrieved and mapped for downstream use."
+    db_operation_success, db_error_message = insert_store_profile_if_absent(
+        stores_collection=stores_collection,
+        profile_data=mapped_profile.model_dump(),
+        logger=logger,
+    )
+    if not db_operation_success:
+        return StoreLookupResponseDto(
+            payload=response_payload,
+            success=False,
+            message=f"Instagram store lookup succeeded, but persisting profile data to database failed. {db_error_message or 'Please try again later.'}",
+            data=mapped_profile,
+        )
+
+    return StoreLookupResponseDto(
+        payload=response_payload,
+        success=True,
+        message=operation_success_message,
+        data=mapped_profile,
+    )
