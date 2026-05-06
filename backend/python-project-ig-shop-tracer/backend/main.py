@@ -4,8 +4,10 @@ import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -27,9 +29,42 @@ if not mongo_connection_string:
 
 mongo_database_name = os.getenv("MONGO_DB_NAME", "Staging")
 mongo_collection_name = os.getenv("MONGO_DB_COLLECTION", "ig_store")
-logger = logging.getLogger(__name__)
 project_root = Path(__file__).resolve().parent.parent
 store_logos_folder = project_root / "store_logos"
+logs_folder = project_root / "logs"
+
+
+def setup_logger() -> logging.Logger:
+    logs_folder.mkdir(parents=True, exist_ok=True)
+    log_file_name = f"{datetime.now().strftime('%Y-%m-%d')}.log"
+    log_file_path = logs_folder / log_file_name
+
+    configured_logger = logging.getLogger("instagram_store_tracer")
+    configured_logger.setLevel(logging.INFO)
+    configured_logger.propagate = False
+
+    if configured_logger.handlers:
+        return configured_logger
+
+    log_formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(log_formatter)
+
+    file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(log_formatter)
+
+    configured_logger.addHandler(console_handler)
+    configured_logger.addHandler(file_handler)
+    return configured_logger
+
+
+logger = setup_logger()
 
 
 @asynccontextmanager
@@ -74,6 +109,8 @@ INSTAGRAM_RAPID_API_HEADERS: dict[str, str] = {
     "x-rapidapi-host": "instagram120.p.rapidapi.com",
     "x-rapidapi-key": rapid_api_key
 }
+
+RAPID_API_PROFILE_REQUEST_RETRIES = 3
 
 
 class StoreItemDto(BaseModel):
@@ -167,15 +204,30 @@ def infer_logo_file_extension(image_url: str, content_type: str | None) -> str:
     return ".jpg"
 
 
-async def download_store_logo(logo_url: str, store_id: str) -> tuple[str | None, str | None]:
+async def download_store_logo(logo_url: str, store_id: str, trace_id: str) -> tuple[str | None, str | None]:
     if logo_url.strip() == "":
         return None, "Store profile did not include a usable picture URL."
 
     store_logos_folder.mkdir(parents=True, exist_ok=True)
+    request_started_at = perf_counter()
     try:
+        logger.info(
+            "[trace_id=%s] Logo download request started for store_id '%s' from url '%s'.",
+            trace_id,
+            store_id,
+            logo_url,
+        )
         async with httpx.AsyncClient() as client:
             response = await client.get(logo_url, follow_redirects=True, timeout=20.0)
             response.raise_for_status()
+        request_elapsed_ms = (perf_counter() - request_started_at) * 1000
+        logger.info(
+            "[trace_id=%s] Logo download request finished for store_id '%s' with HTTP %s in %.2f ms.",
+            trace_id,
+            store_id,
+            response.status_code,
+            request_elapsed_ms,
+        )
 
         logo_extension = infer_logo_file_extension(logo_url, response.headers.get("content-type"))
         logo_filename = f"{store_id}{logo_extension}"
@@ -183,10 +235,32 @@ async def download_store_logo(logo_url: str, store_id: str) -> tuple[str | None,
         logo_absolute_path.write_bytes(response.content)
         return f"/store_logos/{logo_filename}", None
     except httpx.HTTPStatusError as error:
+        request_elapsed_ms = (perf_counter() - request_started_at) * 1000
+        logger.warning(
+            "[trace_id=%s] Logo download failed for store_id '%s' with HTTP %s in %.2f ms.",
+            trace_id,
+            store_id,
+            error.response.status_code,
+            request_elapsed_ms,
+        )
         return None, f"Logo image download failed: endpoint returned HTTP {error.response.status_code}."
     except httpx.HTTPError:
+        request_elapsed_ms = (perf_counter() - request_started_at) * 1000
+        logger.warning(
+            "[trace_id=%s] Logo download network error for store_id '%s' after %.2f ms.",
+            trace_id,
+            store_id,
+            request_elapsed_ms,
+        )
         return None, "Logo image download failed: unable to reach picture URL."
     except OSError:
+        request_elapsed_ms = (perf_counter() - request_started_at) * 1000
+        logger.warning(
+            "[trace_id=%s] Logo write failed for store_id '%s' after %.2f ms.",
+            trace_id,
+            store_id,
+            request_elapsed_ms,
+        )
         return None, "Logo image download failed: unable to write image file to local storage."
 
 
@@ -267,31 +341,97 @@ async def get_page_profile(page_name: str):
     return result
 
 
-async def request_rapid_api_profile(page_name: str) -> tuple[dict[str, Any] | None, str | None]:
+async def request_rapid_api_profile(page_name: str, trace_id: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
     url = INSTAGRAM_RAPID_API["post_user_info"]["url"]
     headers = INSTAGRAM_RAPID_API_HEADERS
     request_payload = {"username": page_name}
+    last_error_message = "Instagram store lookup failed: unknown error."
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=request_payload, headers=headers)
-            response.raise_for_status()
-            api_result = response.json()
-            if not isinstance(api_result, dict):
-                return None, "Instagram store lookup failed: API returned an unsupported response format."
-            return api_result, None
-    except httpx.HTTPStatusError as error:
-        return None, f"Instagram store lookup failed: external API returned HTTP {error.response.status_code}."
-    except httpx.HTTPError:
-        return None, "Instagram store lookup failed: unable to reach external API."
-    except ValueError:
-        return None, "Instagram store lookup failed: API returned invalid JSON."
+    # External API can be transiently unavailable; retry a few times before failing.
+    for attempt in range(1, RAPID_API_PROFILE_REQUEST_RETRIES + 1):
+        request_started_at = perf_counter()
+        logger.info(
+            "[trace_id=%s] Rapid API profile request started for username '%s' (attempt %s/%s).",
+            trace_id or "n/a",
+            page_name,
+            attempt,
+            RAPID_API_PROFILE_REQUEST_RETRIES,
+        )
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=request_payload, headers=headers, timeout=20.0)
+                response.raise_for_status()
+                request_elapsed_ms = (perf_counter() - request_started_at) * 1000
+                logger.info(
+                    "[trace_id=%s] Rapid API profile request succeeded for username '%s' (attempt %s/%s) with HTTP %s in %.2f ms.",
+                    trace_id or "n/a",
+                    page_name,
+                    attempt,
+                    RAPID_API_PROFILE_REQUEST_RETRIES,
+                    response.status_code,
+                    request_elapsed_ms,
+                )
+                api_result = response.json()
+                if not isinstance(api_result, dict):
+                    return None, "Instagram store lookup failed: API returned an unsupported response format."
+                return api_result, None
+        except httpx.HTTPStatusError as error:
+            request_elapsed_ms = (perf_counter() - request_started_at) * 1000
+            status_code = error.response.status_code
+            logger.warning(
+                "[trace_id=%s] Rapid API profile request failed for username '%s' (attempt %s/%s) with HTTP %s in %.2f ms.",
+                trace_id or "n/a",
+                page_name,
+                attempt,
+                RAPID_API_PROFILE_REQUEST_RETRIES,
+                status_code,
+                request_elapsed_ms,
+            )
+            if status_code < 500 and status_code != 429:
+                return None, f"Instagram store lookup failed: external API returned HTTP {status_code}."
+            last_error_message = f"Instagram store lookup failed: external API returned HTTP {status_code}."
+        except httpx.HTTPError:
+            request_elapsed_ms = (perf_counter() - request_started_at) * 1000
+            logger.warning(
+                "[trace_id=%s] Rapid API profile request network error for username '%s' (attempt %s/%s) after %.2f ms.",
+                trace_id or "n/a",
+                page_name,
+                attempt,
+                RAPID_API_PROFILE_REQUEST_RETRIES,
+                request_elapsed_ms,
+            )
+            last_error_message = "Instagram store lookup failed: unable to reach external API."
+        except ValueError:
+            request_elapsed_ms = (perf_counter() - request_started_at) * 1000
+            logger.warning(
+                "[trace_id=%s] Rapid API profile request returned invalid JSON for username '%s' (attempt %s/%s) after %.2f ms.",
+                trace_id or "n/a",
+                page_name,
+                attempt,
+                RAPID_API_PROFILE_REQUEST_RETRIES,
+                request_elapsed_ms,
+            )
+            return None, "Instagram store lookup failed: API returned invalid JSON."
+
+        if attempt < RAPID_API_PROFILE_REQUEST_RETRIES:
+            logger.warning(
+                "[trace_id=%s] Rapid API profile request failed on attempt %s/%s for username '%s'. Retrying.",
+                trace_id or "n/a",
+                attempt,
+                RAPID_API_PROFILE_REQUEST_RETRIES,
+                page_name,
+            )
+
+    return None, f"{last_error_message} Retried {RAPID_API_PROFILE_REQUEST_RETRIES} times."
 
 
 @app.post("/add_store")
 async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookupResponseDto:
+    add_store_started_at = perf_counter()
+    trace_id = str(uuid4())
     page_name = payload.username.strip()
     response_payload = {"query_store_name": page_name}
+    logger.info("[trace_id=%s] Add store request started for username '%s'.", trace_id, page_name)
 
     if page_name == "":
         return StoreLookupResponseDto(
@@ -300,8 +440,15 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
             message="Instagram store lookup rejected: username is required. Provide a valid Instagram username and try again.",
         )
 
-    result, error_message = await request_rapid_api_profile(page_name)
+    result, error_message = await request_rapid_api_profile(page_name, trace_id=trace_id)
     if result is None:
+        total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
+        logger.warning(
+            "[trace_id=%s] Add store request failed during profile lookup for username '%s' in %.2f ms.",
+            trace_id,
+            page_name,
+            total_elapsed_ms,
+        )
         return StoreLookupResponseDto(
             payload=response_payload,
             success=False,
@@ -336,8 +483,16 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
     local_logo_path, logo_download_error = await download_store_logo(
         logo_url=mapped_profile.hd_profile_pic_url,
         store_id=mapped_profile.id,
+        trace_id=trace_id,
     )
     if local_logo_path is None:
+        total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
+        logger.warning(
+            "[trace_id=%s] Add store request failed during logo download for username '%s' in %.2f ms.",
+            trace_id,
+            page_name,
+            total_elapsed_ms,
+        )
         return StoreLookupResponseDto(
             payload=response_payload,
             success=False,
@@ -354,6 +509,13 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
         logger=logger,
     )
     if not db_operation_success:
+        total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
+        logger.warning(
+            "[trace_id=%s] Add store request failed during database insert for username '%s' in %.2f ms.",
+            trace_id,
+            page_name,
+            total_elapsed_ms,
+        )
         return StoreLookupResponseDto(
             payload=response_payload,
             success=False,
@@ -361,6 +523,13 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
             data=mapped_profile,
         )
 
+    total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
+    logger.info(
+        "[trace_id=%s] Add store request completed successfully for username '%s' in %.2f ms.",
+        trace_id,
+        page_name,
+        total_elapsed_ms,
+    )
     return StoreLookupResponseDto(
         payload=response_payload,
         success=True,
