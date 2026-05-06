@@ -3,7 +3,9 @@ import logging
 import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -26,6 +28,8 @@ if not mongo_connection_string:
 mongo_database_name = os.getenv("MONGO_DB_NAME", "Staging")
 mongo_collection_name = os.getenv("MONGO_DB_COLLECTION", "ig_store")
 logger = logging.getLogger(__name__)
+project_root = Path(__file__).resolve().parent.parent
+store_logos_folder = project_root / "store_logos"
 
 
 @asynccontextmanager
@@ -95,6 +99,7 @@ class StoreProfileDto(BaseModel):
     city_name: str = ""
     latitude: Any = ""
     longitude: Any = ""
+    local_logo_path: str = ""
 
     def update_from_source_profile(self, source_profile: dict[str, Any]) -> None:
         hd_profile_pic_url_info = source_profile.get("hd_profile_pic_url_info")
@@ -141,6 +146,48 @@ def to_store_item_dto(profile: StoreProfileDto) -> StoreItemDto:
         latitude=latitude,
         longitude=longitude,
     )
+
+
+def infer_logo_file_extension(image_url: str, content_type: str | None) -> str:
+    if content_type:
+        content_type_base = content_type.split(";")[0].strip().lower()
+        if content_type_base == "image/jpeg":
+            return ".jpg"
+        if content_type_base == "image/png":
+            return ".png"
+        if content_type_base == "image/webp":
+            return ".webp"
+        if content_type_base == "image/gif":
+            return ".gif"
+
+    parsed_url = urlparse(image_url)
+    url_suffix = Path(parsed_url.path).suffix.strip().lower()
+    if url_suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        return ".jpg" if url_suffix == ".jpeg" else url_suffix
+    return ".jpg"
+
+
+async def download_store_logo(logo_url: str, store_id: str) -> tuple[str | None, str | None]:
+    if logo_url.strip() == "":
+        return None, "Store profile did not include a usable picture URL."
+
+    store_logos_folder.mkdir(parents=True, exist_ok=True)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(logo_url, follow_redirects=True, timeout=20.0)
+            response.raise_for_status()
+
+        logo_extension = infer_logo_file_extension(logo_url, response.headers.get("content-type"))
+        logo_filename = f"{store_id}{logo_extension}"
+        logo_absolute_path = store_logos_folder / logo_filename
+        logo_absolute_path.write_bytes(response.content)
+        return f"/store_logos/{logo_filename}", None
+    except httpx.HTTPStatusError as error:
+        return None, f"Logo image download failed: endpoint returned HTTP {error.response.status_code}."
+    except httpx.HTTPError:
+        return None, "Logo image download failed: unable to reach picture URL."
+    except OSError:
+        return None, "Logo image download failed: unable to write image file to local storage."
 
 
 STORE_ITEMS: list[StoreItemDto] = [
@@ -285,6 +332,19 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
             success=False,
             message="Instagram store lookup completed but no usable profile was found. Verify the username and ensure the account is accessible.",
         )
+
+    local_logo_path, logo_download_error = await download_store_logo(
+        logo_url=mapped_profile.hd_profile_pic_url,
+        store_id=mapped_profile.id,
+    )
+    if local_logo_path is None:
+        return StoreLookupResponseDto(
+            payload=response_payload,
+            success=False,
+            message=logo_download_error or "Logo image download failed.",
+            data=mapped_profile,
+        )
+    mapped_profile.local_logo_path = local_logo_path
 
     stores_collection: Collection[Any] = app.state.stores_collection
     operation_success_message = "Instagram store lookup successful. Profile data was retrieved and mapped for downstream use."
