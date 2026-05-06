@@ -2,6 +2,7 @@ export type StoreItem = {
   id: string;
   name: string;
   imageUrl: string;
+  localLogoPath?: string;
   latitude: number;
   longitude: number;
 };
@@ -11,15 +12,20 @@ type StoreCardProps = {
 };
 
 export default function StoreCard({ item }: StoreCardProps) {
+  const backendOrigin = "http://localhost:8000";
+  const trimmedLocalLogoPath = item.localLogoPath?.trim() ?? "";
   const trimmedImageUrl = item.imageUrl.trim();
   const placeholderSrc = "https://dummyimage.com/480x480/e5e7eb/6b7280&text=No+Image";
-  const imageSrc =
-    trimmedImageUrl.length > 0
-      ? trimmedImageUrl
+  const hasLocalLogoPath = trimmedLocalLogoPath.length > 0;
+  const localLogoAbsoluteUrl =
+    trimmedLocalLogoPath.startsWith("/")
+      ? `${backendOrigin}${trimmedLocalLogoPath}`
+      : `${backendOrigin}/${trimmedLocalLogoPath}`;
+  const resolvedImageSrc = hasLocalLogoPath
+    ? localLogoAbsoluteUrl
+    : trimmedImageUrl.length > 0
+      ? `/api/image-proxy?url=${encodeURIComponent(trimmedImageUrl)}`
       : placeholderSrc;
-  const resolvedImageSrc = imageSrc.startsWith("http://") || imageSrc.startsWith("https://")
-    ? `/api/image-proxy?url=${encodeURIComponent(imageSrc)}`
-    : imageSrc;
 
   return (
     <article className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">

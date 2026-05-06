@@ -20,6 +20,15 @@ import type { StoreItem } from "@/components/StoreCard";
 const STORE_API_URL = "http://localhost:8000/stores";
 const ADD_STORE_API_URL = "http://localhost:8000/add_store";
 
+type StoreItemApi = {
+  id?: string;
+  name?: string;
+  imageUrl?: string;
+  localLogoPath?: string;
+  latitude?: number;
+  longitude?: number;
+};
+
 export type SubmitStoreResult = { ok: true } | { ok: false; error: string };
 
 export type UseStoresResult = {
@@ -51,8 +60,16 @@ export function useStores(): UseStoresResult {
         throw new Error(`Failed to fetch stores (HTTP ${response.status})`);
       }
 
-      const payload = (await response.json()) as StoreItem[];
-      setStores(payload);
+      const payload = (await response.json()) as StoreItemApi[];
+      const mappedStores: StoreItem[] = payload.map((item) => ({
+        id: item.id ?? "",
+        name: item.name ?? "",
+        imageUrl: item.imageUrl ?? "",
+        localLogoPath: item.localLogoPath ?? "",
+        latitude: item.latitude ?? 0,
+        longitude: item.longitude ?? 0
+      }));
+      setStores(mappedStores);
     } catch (err) {
       if (signal?.aborted) return;
       const message =
