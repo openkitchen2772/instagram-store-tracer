@@ -24,7 +24,7 @@ export default function SubmitMessageStack({
       {messages.map((message) => (
         <p
           key={message.id}
-          className={`w-max rounded-2xl bg-zinc-900 px-5 py-3 text-center text-sm font-semibold text-white shadow-xl transition-all duration-300 sm:text-base ${
+          className={`w-max rounded-2xl bg-white/95 px-5 py-3 text-center text-sm font-semibold text-zinc-800 shadow-[0_10px_25px_rgba(131,58,180,0.14)] ring-1 ring-white transition-all duration-300 sm:text-base ${
             message.isVisible
               ? "translate-y-0 opacity-100"
               : "pointer-events-none translate-y-1 opacity-0"

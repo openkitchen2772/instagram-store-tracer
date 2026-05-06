@@ -24,7 +24,11 @@ import {
   type ReactNode,
 } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faPaperPlane, faPlus } from "@fortawesome/free-solid-svg-icons";
+import {
+  faPaperPlane,
+  faPlus,
+  faSpinner,
+} from "@fortawesome/free-solid-svg-icons";
 
 type FloatingStoreSubmitterProps = {
   /**
@@ -65,6 +69,8 @@ export default function FloatingStoreSubmitter({
       if (!targetNode) return;
       if (containerRef.current?.contains(targetNode)) return;
 
+      if (isSubmitting) return;
+
       setIsOpen(false);
       setValue("");
     };
@@ -76,10 +82,11 @@ export default function FloatingStoreSubmitter({
       document.removeEventListener("mousedown", handlePointerDownOutside);
       document.removeEventListener("touchstart", handlePointerDownOutside);
     };
-  }, [isOpen]);
+  }, [isOpen, isSubmitting]);
 
   const handleOpen = () => setIsOpen(true);
   const handleClose = () => {
+    if (isSubmitting) return;
     setIsOpen(false);
     setValue("");
   };
@@ -108,11 +115,18 @@ export default function FloatingStoreSubmitter({
     >
       {children}
 
+      {isSubmitting ? (
+        <p className="pointer-events-none mb-2 rounded-full bg-white/95 px-3 py-1 text-xs font-medium text-zinc-700 shadow-sm ring-1 ring-zinc-200">
+          Processing store submission...
+        </p>
+      ) : null}
+
       <form
         className={`pointer-events-auto flex h-14 origin-right items-center overflow-hidden rounded-full bg-white shadow-[0_10px_30px_rgba(225,48,108,0.28)] ring-1 ring-zinc-300 transition-all duration-300 ease-out ${
           isOpen ? "w-[min(85vw,22rem)] opacity-100" : "w-14 opacity-100"
         }`}
         onSubmit={handleSubmit}
+        aria-busy={isSubmitting}
       >
         {isOpen ? (
           <>
@@ -125,16 +139,25 @@ export default function FloatingStoreSubmitter({
                 if (event.key === "Escape") handleClose();
               }}
               className="h-full w-full bg-white pl-5 pr-2 text-sm text-zinc-800 outline-none"
-              placeholder="Submit Instagram store name"
+              placeholder={
+                isSubmitting
+                  ? "Processing submission..."
+                  : "Submit Instagram store name"
+              }
               aria-label="Instagram store name"
+              disabled={isSubmitting}
             />
             <button
               type="submit"
               disabled={isSubmitting}
-              className="mr-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#f58529_0%,#dd2a7b_50%,#8134af_100%)] text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300"
-              aria-label="Submit store name"
+              className="mr-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#f58529_0%,#dd2a7b_50%,#8134af_100%)] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300"
+              aria-label={isSubmitting ? "Submitting store name" : "Submit store name"}
             >
-              <FontAwesomeIcon icon={faPaperPlane} aria-hidden="true" />
+              <FontAwesomeIcon
+                icon={isSubmitting ? faSpinner : faPaperPlane}
+                className={isSubmitting ? "animate-spin" : undefined}
+                aria-hidden="true"
+              />
             </button>
           </>
         ) : (
