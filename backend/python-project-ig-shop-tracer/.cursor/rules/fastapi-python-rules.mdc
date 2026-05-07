@@ -12,6 +12,9 @@ alwaysApply: false
 - Prefer concrete and readable types from `typing` when needed.
 - Avoid introducing untyped new functions unless explicitly requested.
 
+# database operations rule
+- always add logging for any database operation
+
 # FastAPI API interface
 - Use JSON to communicate between front-end and back-end
 - Make DTO for reusable objects or entities and for Pydantic data validation

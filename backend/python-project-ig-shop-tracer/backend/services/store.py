@@ -1,12 +1,12 @@
 import logging
 from typing import Any
 
-from pymongo.collection import Collection
+from models.collections import CollectionName
 from pymongo.errors import PyMongoError
+from services.database import get_mongo_db
 
 
-def insert_store_profile_if_absent(
-    stores_collection: Collection[Any],
+def create_store(
     profile_data: dict[str, Any],
     logger: logging.Logger,
 ) -> tuple[bool, str | None]:
@@ -17,6 +17,8 @@ def insert_store_profile_if_absent(
     logger.info("DB operation start: check existing profile for id=%s", profile_id)
 
     try:
+        mongo_db = get_mongo_db()
+        stores_collection = mongo_db[CollectionName.STORE.value]
         existing_profile = stores_collection.find_one({"id": profile_id}, {"_id": 1})
         if existing_profile is None:
             logger.info("DB operation: no existing profile found, inserting id=%s", profile_id)

@@ -12,10 +12,18 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pymongo import MongoClient
+from dtos.bookmarks import BookmarksDTO
+from dtos.store import StoreDTO
+from models.collections import CollectionName
+from services.database import close_mongo_connection, get_mongo_db
+from services.bookmarks import create_bookmarks as create_bookmarks_in_db
+from services.bookmarks import get_bookmarks as get_bookmarks_from_db
+from models.store import Store
 from pymongo.collection import Collection
-from pydantic import BaseModel
-from instagram_store_db_service import insert_store_profile_if_absent
+from schemas.bookmarks import BookmarksAdd
+from schemas.base import ResponseBase
+from schemas.store import StoreAdd
+from services.store import create_store
 
 # load environmental variable
 load_dotenv()  # load env_var for local dev environment, do nothing for prod env
@@ -28,7 +36,6 @@ if not mongo_connection_string:
     raise ValueError("MongoDB connection string is missing! Please set MONGO_DB_CONNECTION_STRING in .env or environment variables.")
 
 mongo_database_name = os.getenv("MONGO_DB_NAME", "Staging")
-mongo_collection_name = os.getenv("MONGO_DB_COLLECTION", "ig_store")
 project_root = Path(__file__).resolve().parent.parent
 store_logos_folder = project_root / "store_logos"
 logs_folder = project_root / "logs"
@@ -69,19 +76,18 @@ logger = setup_logger()
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    mongo_client = MongoClient(mongo_connection_string, serverSelectionTimeoutMS=5000)
-    mongo_db = mongo_client[mongo_database_name]
-    stores_collection = mongo_db[mongo_collection_name]
+    mongo_db = get_mongo_db()
+    stores_collection = mongo_db[CollectionName.STORE.value]
 
     # Connection check should fail fast on startup if db is not reachable.
-    mongo_client.admin.command("ping")
+    mongo_db.command("ping")
     seeded_count = seed_dummy_store_items_once(stores_collection, mongo_db["seed_meta"])
     print(f"MongoDB connected successfully. Initial seed inserted {seeded_count} record(s).")
 
-    application.state.mongo_client = mongo_client
+    application.state.mongo_db = mongo_db
     application.state.stores_collection = stores_collection
     yield
-    mongo_client.close()
+    close_mongo_connection()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -113,56 +119,7 @@ INSTAGRAM_RAPID_API_HEADERS: dict[str, str] = {
 RAPID_API_PROFILE_REQUEST_RETRIES = 3
 
 
-class StoreItemDto(BaseModel):
-    id: str
-    name: str
-    imageUrl: str
-    latitude: float
-    longitude: float
-
-
-class InstagramStoreLookupRequest(BaseModel):
-    username: str
-
-
-# Data Interface Models
-class StoreProfileDto(BaseModel):
-    id: str = ""
-    full_name: str = ""
-    biography: str = ""
-    hd_profile_pic_url: str = ""
-    contact_phone_number: str = ""
-    public_email: str = ""
-    city_name: str = ""
-    latitude: Any = ""
-    longitude: Any = ""
-    local_logo_path: str = ""
-
-    def update_from_source_profile(self, source_profile: dict[str, Any]) -> None:
-        hd_profile_pic_url_info = source_profile.get("hd_profile_pic_url_info")
-        hd_profile_pic_url = ""
-        if isinstance(hd_profile_pic_url_info, dict):
-            hd_profile_pic_url = str(hd_profile_pic_url_info.get("url", ""))
-
-        self.id = str(source_profile.get("id", "") or "")
-        self.full_name = str(source_profile.get("full_name", "") or "")
-        self.biography = str(source_profile.get("biography", "") or "")
-        self.hd_profile_pic_url = hd_profile_pic_url
-        self.contact_phone_number = str(source_profile.get("contact_phone_number", "") or "")
-        self.public_email = str(source_profile.get("public_email", "") or "")
-        self.city_name = str(source_profile.get("city_name", "") or "")
-        self.latitude = source_profile.get("latitude", "")
-        self.longitude = source_profile.get("longitude", "")
-
-
-class StoreLookupResponseDto(BaseModel):
-    payload: dict[str, str]
-    success: bool
-    message: str
-    data: StoreProfileDto | None = None
-
-
-def to_store_item_dto(profile: StoreProfileDto) -> StoreItemDto:
+def to_store_item_dto(profile: Store) -> StoreDTO:
     latitude_value = profile.latitude
     longitude_value = profile.longitude
 
@@ -176,7 +133,7 @@ def to_store_item_dto(profile: StoreProfileDto) -> StoreItemDto:
     except (TypeError, ValueError):
         longitude = 0.0
 
-    return StoreItemDto(
+    return StoreDTO(
         id=profile.id,
         name=profile.full_name or profile.id,
         imageUrl=profile.hd_profile_pic_url,
@@ -264,19 +221,19 @@ async def download_store_logo(logo_url: str, store_id: str, trace_id: str) -> tu
         return None, "Logo image download failed: unable to write image file to local storage."
 
 
-STORE_ITEMS: list[StoreItemDto] = [
-    StoreItemDto(id="s1", name="Store 01", imageUrl="https://picsum.photos/seed/store1/480/480", latitude=40.7128, longitude=-74.006),
-    StoreItemDto(id="s2", name="Store 02", imageUrl="https://picsum.photos/seed/store2/480/480", latitude=34.0522, longitude=-118.2437),
-    StoreItemDto(id="s3", name="Store 03", imageUrl="https://picsum.photos/seed/store3/480/480", latitude=51.5072, longitude=-0.1276),
-    StoreItemDto(id="s4", name="Store 04", imageUrl="https://picsum.photos/seed/store4/480/480", latitude=35.6762, longitude=139.6503),
-    StoreItemDto(id="s5", name="Store 05", imageUrl="https://picsum.photos/seed/store5/480/480", latitude=22.3193, longitude=114.1694),
-    StoreItemDto(id="s6", name="Store 06", imageUrl="https://picsum.photos/seed/store6/480/480", latitude=1.3521, longitude=103.8198),
-    StoreItemDto(id="s7", name="Store 07", imageUrl="https://picsum.photos/seed/store7/480/480", latitude=48.8566, longitude=2.3522),
-    StoreItemDto(id="s8", name="Store 08", imageUrl="https://picsum.photos/seed/store8/480/480", latitude=52.52, longitude=13.405),
-    StoreItemDto(id="s9", name="Store 09", imageUrl="https://picsum.photos/seed/store9/480/480", latitude=-33.8688, longitude=151.2093),
-    StoreItemDto(id="s10", name="Store 10", imageUrl="https://picsum.photos/seed/store10/480/480", latitude=41.9028, longitude=12.4964),
-    StoreItemDto(id="s11", name="Store 11", imageUrl="https://picsum.photos/seed/store11/480/480", latitude=37.5665, longitude=126.978),
-    StoreItemDto(id="s12", name="Store 12", imageUrl="https://picsum.photos/seed/store12/480/480", latitude=25.033, longitude=121.5654),
+STORE_ITEMS: list[StoreDTO] = [
+    StoreDTO(id="s1", name="Store 01", imageUrl="https://picsum.photos/seed/store1/480/480", latitude=40.7128, longitude=-74.006),
+    StoreDTO(id="s2", name="Store 02", imageUrl="https://picsum.photos/seed/store2/480/480", latitude=34.0522, longitude=-118.2437),
+    StoreDTO(id="s3", name="Store 03", imageUrl="https://picsum.photos/seed/store3/480/480", latitude=51.5072, longitude=-0.1276),
+    StoreDTO(id="s4", name="Store 04", imageUrl="https://picsum.photos/seed/store4/480/480", latitude=35.6762, longitude=139.6503),
+    StoreDTO(id="s5", name="Store 05", imageUrl="https://picsum.photos/seed/store5/480/480", latitude=22.3193, longitude=114.1694),
+    StoreDTO(id="s6", name="Store 06", imageUrl="https://picsum.photos/seed/store6/480/480", latitude=1.3521, longitude=103.8198),
+    StoreDTO(id="s7", name="Store 07", imageUrl="https://picsum.photos/seed/store7/480/480", latitude=48.8566, longitude=2.3522),
+    StoreDTO(id="s8", name="Store 08", imageUrl="https://picsum.photos/seed/store8/480/480", latitude=52.52, longitude=13.405),
+    StoreDTO(id="s9", name="Store 09", imageUrl="https://picsum.photos/seed/store9/480/480", latitude=-33.8688, longitude=151.2093),
+    StoreDTO(id="s10", name="Store 10", imageUrl="https://picsum.photos/seed/store10/480/480", latitude=41.9028, longitude=12.4964),
+    StoreDTO(id="s11", name="Store 11", imageUrl="https://picsum.photos/seed/store11/480/480", latitude=37.5665, longitude=126.978),
+    StoreDTO(id="s12", name="Store 12", imageUrl="https://picsum.photos/seed/store12/480/480", latitude=25.033, longitude=121.5654),
 ]
 
 
@@ -309,8 +266,8 @@ def seed_dummy_store_items_once(stores_collection: Collection[Any], seed_meta_co
     return inserted_count
 
 
-@app.get("/stores", response_model=list[StoreItemDto])
-async def get_store_items(skip: int = 0, limit: int = 0) -> list[StoreItemDto]:
+@app.get("/stores", response_model=list[StoreDTO])
+async def get_store_items(skip: int = 0, limit: int = 0) -> list[StoreDTO]:
     start_index = max(skip, 0)
     stores_collection: Collection[Any] = app.state.stores_collection
 
@@ -320,18 +277,18 @@ async def get_store_items(skip: int = 0, limit: int = 0) -> list[StoreItemDto]:
         cursor = cursor.limit(limit)
 
     records = list(cursor)
-    mapped_items: list[StoreItemDto] = []
+    mapped_items: list[StoreDTO] = []
     for record in records:
         source_record = dict(record)
         source_record.pop("_id", None)
-        mapped_items.append(to_store_item_dto(StoreProfileDto(**source_record)))
+        mapped_items.append(to_store_item_dto(Store(**source_record)))
     return mapped_items
 
 
 @app.get("/health/db")
 async def database_health_check() -> dict[str, str]:
-    mongo_client: MongoClient = app.state.mongo_client
-    mongo_client.admin.command("ping")
+    mongo_db = get_mongo_db()
+    mongo_db.command("ping")
     return {"status": "ok"}
 
 
@@ -339,6 +296,52 @@ async def database_health_check() -> dict[str, str]:
 async def get_page_profile(page_name: str):
     result, _ = await request_rapid_api_profile(page_name)
     return result
+
+
+@app.post("/create_bookmarks")
+async def create_bookmarks(payload: BookmarksAdd) -> ResponseBase[dict[str, str]]:
+    bookmarks_uuid = payload.uuid.strip()
+    response_payload = {"uuid": bookmarks_uuid}
+    created_bookmarks, error_message = create_bookmarks_in_db(
+        bookmarks_uuid=bookmarks_uuid,
+        logger=logger,
+    )
+    if created_bookmarks is None:
+        return ResponseBase[dict[str, str]](
+            payload=response_payload,
+            success=False,
+            message=error_message or "Bookmarks create failed.",
+        )
+
+    return ResponseBase[dict[str, str]](
+        payload=response_payload,
+        success=True,
+        message="Bookmarks were created successfully.",
+        data={"uuid": created_bookmarks.uuid},
+    )
+
+
+@app.get("/get_bookmarks/{bookmarks_uuid}")
+async def get_bookmarks(bookmarks_uuid: str) -> ResponseBase[BookmarksDTO]:
+    normalized_uuid = bookmarks_uuid.strip()
+    response_payload = {"uuid": normalized_uuid}
+    bookmarks_data, error_message = get_bookmarks_from_db(
+        bookmarks_uuid=normalized_uuid,
+        logger=logger,
+    )
+    if bookmarks_data is None:
+        return ResponseBase[BookmarksDTO](
+            payload=response_payload,
+            success=False,
+            message=error_message or "Bookmarks lookup failed.",
+        )
+
+    return ResponseBase[BookmarksDTO](
+        payload=response_payload,
+        success=True,
+        message="Bookmarks lookup successful.",
+        data=bookmarks_data,
+    )
 
 
 async def request_rapid_api_profile(page_name: str, trace_id: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
@@ -426,7 +429,7 @@ async def request_rapid_api_profile(page_name: str, trace_id: str | None = None)
 
 
 @app.post("/add_store")
-async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookupResponseDto:
+async def add_store_profile(payload: StoreAdd) -> ResponseBase[Store]:
     add_store_started_at = perf_counter()
     trace_id = str(uuid4())
     page_name = payload.username.strip()
@@ -434,7 +437,7 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
     logger.info("[trace_id=%s] Add store request started for username '%s'.", trace_id, page_name)
 
     if page_name == "":
-        return StoreLookupResponseDto(
+        return ResponseBase[Store](
             payload=response_payload,
             success=False,
             message="Instagram store lookup rejected: username is required. Provide a valid Instagram username and try again.",
@@ -449,7 +452,7 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
             page_name,
             total_elapsed_ms,
         )
-        return StoreLookupResponseDto(
+        return ResponseBase[Store](
             payload=response_payload,
             success=False,
             message=error_message or "Instagram store lookup failed: unknown error.",
@@ -470,11 +473,11 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
         else:
             source_profile = result_container
 
-    mapped_profile = StoreProfileDto()
+    mapped_profile = Store()
     mapped_profile.update_from_source_profile(source_profile)
 
     if mapped_profile.id == "":
-        return StoreLookupResponseDto(
+        return ResponseBase[Store](
             payload=response_payload,
             success=False,
             message="Instagram store lookup completed but no usable profile was found. Verify the username and ensure the account is accessible.",
@@ -493,7 +496,7 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
             page_name,
             total_elapsed_ms,
         )
-        return StoreLookupResponseDto(
+        return ResponseBase[Store](
             payload=response_payload,
             success=False,
             message=logo_download_error or "Logo image download failed.",
@@ -501,10 +504,8 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
         )
     mapped_profile.local_logo_path = local_logo_path
 
-    stores_collection: Collection[Any] = app.state.stores_collection
     operation_success_message = "Instagram store lookup successful. Profile data was retrieved and mapped for downstream use."
-    db_operation_success, db_error_message = insert_store_profile_if_absent(
-        stores_collection=stores_collection,
+    db_operation_success, db_error_message = create_store(
         profile_data=mapped_profile.model_dump(),
         logger=logger,
     )
@@ -516,7 +517,7 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
             page_name,
             total_elapsed_ms,
         )
-        return StoreLookupResponseDto(
+        return ResponseBase[Store](
             payload=response_payload,
             success=False,
             message=f"Instagram store lookup succeeded, but persisting profile data to database failed. {db_error_message or 'Please try again later.'}",
@@ -530,7 +531,7 @@ async def add_store_profile(payload: InstagramStoreLookupRequest) -> StoreLookup
         page_name,
         total_elapsed_ms,
     )
-    return StoreLookupResponseDto(
+    return ResponseBase[Store](
         payload=response_payload,
         success=True,
         message=operation_success_message,
