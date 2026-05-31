@@ -25,3 +25,7 @@ Follow these standards for any task in this workspace:
 - This project uses a Next.js variant with breaking differences from common defaults.
 - Before framework-level or routing changes, check relevant docs in `node_modules/next/dist/docs/` and follow deprecation guidance.
 - Add documentation or comment to lines or functions that is not intuitive to understand.
+
+# React.js Requirement
+
+- Ensure any ui button will become disabled while triggered and loading, to avoid double-click from user

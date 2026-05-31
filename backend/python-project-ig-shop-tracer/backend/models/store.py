@@ -1,12 +1,17 @@
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Store(BaseModel):
     id: str = ""
+    username: str = ""
     full_name: str = ""
     biography: str = ""
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    store_locations: list[tuple[float, float]] = Field(default_factory=list)
+    addresses: list[str] = Field(default_factory=list)
     hd_profile_pic_url: str = ""
     contact_phone_number: str = ""
     public_email: str = ""
@@ -22,6 +27,7 @@ class Store(BaseModel):
             hd_profile_pic_url = str(hd_profile_pic_url_info.get("url", ""))
 
         self.id = str(source_profile.get("id", "") or "")
+        self.username = str(source_profile.get("username", "") or "")
         self.full_name = str(source_profile.get("full_name", "") or "")
         self.biography = str(source_profile.get("biography", "") or "")
         self.hd_profile_pic_url = hd_profile_pic_url
