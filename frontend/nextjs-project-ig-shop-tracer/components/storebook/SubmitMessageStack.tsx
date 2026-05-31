@@ -20,11 +20,11 @@ export default function SubmitMessageStack({
   messages,
 }: SubmitMessageStackProps) {
   return (
-    <div className="mb-4 flex flex-col items-end gap-2">
+    <div className="mb-4 flex w-full max-w-[min(calc(100vw-2rem),20rem)] flex-col items-end gap-2">
       {messages.map((message) => (
         <p
           key={message.id}
-          className={`w-max rounded-2xl bg-white/95 px-5 py-3 text-center text-sm font-semibold text-zinc-800 shadow-[0_10px_25px_rgba(131,58,180,0.14)] ring-1 ring-white transition-all duration-300 sm:text-base ${
+          className={`w-full max-w-full break-words rounded-2xl bg-white/95 px-4 py-2.5 text-left text-sm font-semibold text-zinc-800 shadow-[0_10px_25px_rgba(131,58,180,0.14)] ring-1 ring-white transition-all duration-300 sm:px-5 sm:py-3 sm:text-center sm:text-base ${
             message.isVisible
               ? "translate-y-0 opacity-100"
               : "pointer-events-none translate-y-1 opacity-0"

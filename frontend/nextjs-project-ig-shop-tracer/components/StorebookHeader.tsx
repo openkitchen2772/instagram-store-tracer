@@ -30,12 +30,12 @@ export default function StorebookHeader({
   containerRef,
 }: StorebookHeaderProps) {
   const baseButtonClass =
-    "flex h-10 w-10 items-center justify-center rounded-full border text-base transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300";
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-base transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 sm:h-10 sm:w-10";
 
   return (
     <div
       ref={containerRef}
-      className="sticky top-0 z-20 flex flex-col gap-3 bg-white/90 px-4 py-3 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between sm:px-6"
+      className="sticky top-0 z-20 flex min-w-0 flex-col gap-2.5 bg-white/90 px-3 py-2.5 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-6 sm:py-3"
     >
       <div className="flex items-center gap-2">
         <button
@@ -69,7 +69,7 @@ export default function StorebookHeader({
           type="search"
           value={searchQuery}
           onChange={(event) => onSearchChange(event.target.value)}
-          className="h-11 min-w-0 flex-1 rounded-full border border-zinc-300 bg-white px-4 text-sm text-zinc-800 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          className="h-10 min-w-0 flex-1 rounded-full border border-zinc-300 bg-white px-3 text-sm text-zinc-800 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 sm:h-11 sm:px-4"
           placeholder="Search store"
           aria-label="Search stores"
         />

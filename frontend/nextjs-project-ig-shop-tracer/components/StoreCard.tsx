@@ -63,7 +63,7 @@ export default function StoreCard({
   }, [item.tags]);
   return (
     <article
-      className={`group relative rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+      className={`group relative min-w-0 rounded-2xl border border-zinc-200 bg-white p-2.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-3 ${
         isInteractive ? "cursor-pointer" : ""
       }`}
       role={isInteractive ? "button" : undefined}
@@ -109,22 +109,22 @@ export default function StoreCard({
           }}
         />
       </div>
-      <p className="pt-3 text-center text-sm font-medium text-zinc-800">
+      <p className="line-clamp-2 break-words pt-2 text-center text-xs font-medium text-zinc-800 sm:pt-3 sm:text-sm">
         {item.fullName || item.username}
       </p>
       {randomTags.length > 0 ? (
-        <ul className="mt-2 flex flex-wrap justify-center gap-1.5">
+        <ul className="mt-1.5 flex flex-wrap justify-center gap-1 sm:mt-2 sm:gap-1.5">
           {randomTags.map((tag) => (
             <li
               key={tag}
-              className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600"
+              className="inline-flex max-w-full items-center gap-1 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[0.65rem] text-zinc-600 sm:gap-1.5 sm:px-2 sm:text-xs"
             >
               <FontAwesomeIcon
                 icon={faTag}
-                className="h-3 w-3 shrink-0 text-zinc-500"
+                className="h-2.5 w-2.5 shrink-0 text-zinc-500 sm:h-3 sm:w-3"
                 aria-hidden="true"
               />
-              <span>{tag}</span>
+              <span className="truncate">{tag}</span>
             </li>
           ))}
         </ul>

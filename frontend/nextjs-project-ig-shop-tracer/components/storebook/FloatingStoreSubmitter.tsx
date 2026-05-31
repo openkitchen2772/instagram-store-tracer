@@ -111,19 +111,19 @@ export default function FloatingStoreSubmitter({
   return (
     <div
       ref={containerRef}
-      className="pointer-events-none fixed bottom-6 right-5 z-40 flex flex-col items-end sm:bottom-8 sm:right-10"
+      className="pointer-events-none fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-40 flex w-[min(calc(100vw-2rem),22rem)] flex-col items-end sm:bottom-[max(2rem,env(safe-area-inset-bottom))] sm:right-[max(2.5rem,env(safe-area-inset-right))]"
     >
       {children}
 
       {isSubmitting ? (
-        <p className="pointer-events-none mb-2 rounded-full bg-white/95 px-3 py-1 text-xs font-medium text-zinc-700 shadow-sm ring-1 ring-zinc-200">
+        <p className="pointer-events-none mb-2 max-w-full break-words rounded-full bg-white/95 px-3 py-1 text-left text-xs font-medium text-zinc-700 shadow-sm ring-1 ring-zinc-200">
           Processing store submission...
         </p>
       ) : null}
 
       <form
-        className={`pointer-events-auto flex h-14 origin-right items-center overflow-hidden rounded-full bg-white shadow-[0_10px_30px_rgba(225,48,108,0.28)] ring-1 ring-zinc-300 transition-all duration-300 ease-out ${
-          isOpen ? "w-[min(85vw,22rem)] opacity-100" : "w-14 opacity-100"
+        className={`pointer-events-auto flex h-14 min-w-0 origin-right items-center overflow-hidden rounded-full bg-white shadow-[0_10px_30px_rgba(225,48,108,0.28)] ring-1 ring-zinc-300 transition-all duration-300 ease-out ${
+          isOpen ? "w-full opacity-100" : "w-14 shrink-0 opacity-100"
         }`}
         onSubmit={handleSubmit}
         aria-busy={isSubmitting}
@@ -138,7 +138,7 @@ export default function FloatingStoreSubmitter({
               onKeyDown={(event) => {
                 if (event.key === "Escape") handleClose();
               }}
-              className="h-full w-full bg-white pl-5 pr-2 text-sm text-zinc-800 outline-none"
+              className="h-full min-w-0 flex-1 bg-white pl-4 pr-2 text-sm text-zinc-800 outline-none sm:pl-5"
               placeholder={
                 isSubmitting
                   ? "Processing submission..."

@@ -136,14 +136,14 @@ export default function StorebookPage({
   }, [selectedStore, stores]);
 
   return (
-    <main className="h-dvh overflow-hidden bg-[radial-gradient(circle_at_15%_20%,rgba(245,133,41,0.22),transparent_38%),radial-gradient(circle_at_85%_12%,rgba(131,58,180,0.2),transparent_42%),radial-gradient(circle_at_50%_100%,rgba(225,48,108,0.18),transparent_45%),linear-gradient(180deg,#fff8fb_0%,#f7f7ff_100%)] px-4 py-5 text-zinc-900 sm:px-6 sm:py-6">
-      <div className="mx-auto grid h-full w-full max-w-6xl grid-rows-[2fr_8fr] gap-4">
+    <main className="h-dvh overflow-hidden bg-[radial-gradient(circle_at_15%_20%,rgba(245,133,41,0.22),transparent_38%),radial-gradient(circle_at_85%_12%,rgba(131,58,180,0.2),transparent_42%),radial-gradient(circle_at_50%_100%,rgba(225,48,108,0.18),transparent_45%),linear-gradient(180deg,#fff8fb_0%,#f7f7ff_100%)] px-3 py-4 text-zinc-900 sm:px-6 sm:py-6">
+      <div className="mx-auto grid h-full w-full min-w-0 max-w-6xl grid-rows-[auto_1fr] gap-3 sm:gap-4">
         <TopBar
           appName="Instagram Shop Tracer"
           sessionName={bookmarksUuid ?? "…"}
         />
 
-        <section className="relative overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+        <section className="relative min-h-0 overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
           <div
             ref={scrollContainerRef}
             className={`storebook-scroll h-full overflow-x-hidden overflow-y-auto overscroll-contain ${

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { v4 as uuidv4 } from "uuid";
 
 const BOOKMARK_UUID_STORAGE_KEY = "bookmark-uuid";
 const CREATE_BOOKMARK_API_URL = "/api/backend/create_bookmark";
@@ -34,7 +35,7 @@ async function createBookmarksByUUID(uuid: string): Promise<void> {
 
 /**
  * Stable per-browser session id persisted in localStorage. Reuses an existing
- * value when present; otherwise creates one with `crypto.randomUUID()` and
+ * value when present; otherwise creates one with `uuid` v4 and
  * stores it under `bookmark-uuid`. On first creation, calls the backend
  * `create_bookmark` API so a matching bookmarks document exists before the
  * session id is exposed to consumers (avoids racing `get_bookmarks`). Returns
@@ -54,7 +55,7 @@ export function useBookmarkSessionId(): string | null {
         try {
           existing = localStorage.getItem(BOOKMARK_UUID_STORAGE_KEY);
         } catch {
-          setSessionId(crypto.randomUUID());
+          setSessionId(uuidv4());
           return;
         }
 
@@ -63,11 +64,11 @@ export function useBookmarkSessionId(): string | null {
           return;
         }
 
-        const created = crypto.randomUUID();
+        const created = uuidv4();
         try {
           localStorage.setItem(BOOKMARK_UUID_STORAGE_KEY, created);
         } catch {
-          setSessionId(crypto.randomUUID());
+          setSessionId(uuidv4());
           return;
         }
 

@@ -159,9 +159,9 @@ export default function StoreLocationsMap({
 
   if (!trimmedApiKey) {
     return (
-      <div className={className}>
+      <div className={`min-w-0 ${className}`}>
         <div
-          className="flex h-[min(420px,55dvh)] w-full items-center justify-center rounded-xl bg-zinc-100 px-4 text-center text-sm text-zinc-600 ring-1 ring-zinc-200"
+          className="flex h-[min(280px,45dvh)] w-full min-w-0 items-center justify-center rounded-xl bg-zinc-100 px-4 text-center text-sm text-zinc-600 ring-1 ring-zinc-200 sm:h-[min(420px,55dvh)]"
           role="status"
         >
           Google Maps API key is not configured.
@@ -171,18 +171,18 @@ export default function StoreLocationsMap({
   }
 
   return (
-    <div className={className}>
+    <div className={`min-w-0 ${className}`}>
       <div
         ref={mapContainerRef}
-        className="h-[min(420px,55dvh)] w-full rounded-xl bg-zinc-100 ring-1 ring-zinc-200"
+        className="h-[min(280px,45dvh)] w-full min-w-0 overflow-hidden rounded-xl bg-zinc-100 ring-1 ring-zinc-200 sm:h-[min(420px,55dvh)]"
         role="application"
         aria-label="Store locations map"
       />
       {mapStatus === "loading" ? (
-        <p className="mt-2 text-sm text-zinc-600">Loading map...</p>
+        <p className="mt-2 break-words text-sm text-zinc-600">Loading map...</p>
       ) : null}
       {mapStatus === "error" && mapError ? (
-        <p className="mt-2 text-sm text-red-700">{mapError}</p>
+        <p className="mt-2 break-words text-sm text-red-700">{mapError}</p>
       ) : null}
       {mapStatus === "ready" && usableLocations.length === 0 ? (
         <p className="mt-2 text-sm text-zinc-600">

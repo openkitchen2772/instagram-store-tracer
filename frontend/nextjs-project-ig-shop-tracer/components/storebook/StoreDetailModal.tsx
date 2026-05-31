@@ -73,7 +73,7 @@ export default function StoreDetailModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center sm:p-6"
       role="presentation"
     >
       <div
@@ -82,7 +82,7 @@ export default function StoreDetailModal({
         onMouseDown={onClose}
       />
       <div
-        className="store-detail-modal-panel relative z-10 flex max-h-[min(90dvh,40rem)] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-zinc-200"
+        className="store-detail-modal-panel relative z-10 flex max-h-[min(92dvh,40rem)] w-full min-w-0 max-w-md flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-zinc-200 sm:max-h-[min(90dvh,40rem)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="store-detail-title"
@@ -97,7 +97,7 @@ export default function StoreDetailModal({
           <FontAwesomeIcon icon={faXmark} className="h-4 w-4" aria-hidden="true" />
         </button>
 
-        <div className="store-detail-modal-scroll overflow-y-auto overscroll-contain px-5 pb-6 pt-5 sm:px-6 sm:pb-7 sm:pt-6">
+        <div className="store-detail-modal-scroll min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pb-6 pt-5 sm:px-6 sm:pb-7 sm:pt-6">
           <div className="mx-auto aspect-square w-28 max-w-[40%] overflow-hidden rounded-2xl bg-zinc-100 ring-1 ring-zinc-200 sm:w-32">
             <img
               src={imageSrc}
@@ -126,7 +126,7 @@ export default function StoreDetailModal({
               href={instagramProfileUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-4 block text-center text-lg font-semibold text-[#8134af] transition hover:text-[#dd2a7b] hover:underline"
+              className="mt-4 block break-all text-center text-base font-semibold text-[#8134af] transition hover:text-[#dd2a7b] hover:underline sm:text-lg"
             >
               @{instagramUsername}
             </a>
@@ -136,7 +136,7 @@ export default function StoreDetailModal({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
               Description
             </h3>
-            <p className="mt-1.5 text-sm leading-relaxed text-zinc-700">
+            <p className="mt-1.5 break-words text-sm leading-relaxed text-zinc-700">
               {description || (
                 <span className="italic text-zinc-500">No description available.</span>
               )}
@@ -159,7 +159,7 @@ export default function StoreDetailModal({
                       className="h-3 w-3 shrink-0 text-zinc-500"
                       aria-hidden="true"
                     />
-                    <span>{tag}</span>
+                    <span className="max-w-full break-words">{tag}</span>
                   </li>
                 ))}
               </ul>
@@ -177,14 +177,14 @@ export default function StoreDetailModal({
                 {addresses.map((address, index) => (
                   <li
                     key={`${address}:${index}`}
-                    className="flex items-start gap-2.5 text-sm leading-relaxed text-zinc-700"
+                    className="flex min-w-0 items-start gap-2.5 text-sm leading-relaxed text-zinc-700"
                   >
                     <FontAwesomeIcon
                       icon={faMapLocationDot}
                       className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500"
                       aria-hidden="true"
                     />
-                    <span>{address}</span>
+                    <span className="min-w-0 break-words">{address}</span>
                   </li>
                 ))}
               </ul>

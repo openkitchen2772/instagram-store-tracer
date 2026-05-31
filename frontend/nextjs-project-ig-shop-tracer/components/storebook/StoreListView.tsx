@@ -90,21 +90,21 @@ export default function StoreListView({
   };
 
   return (
-    <div className="px-4 pb-28 pt-2 sm:px-6 sm:pb-32">
+    <div className="min-w-0 px-3 pb-28 pt-2 sm:px-6 sm:pb-32">
       {isLoading ? (
         <p className="rounded-2xl bg-zinc-50 px-4 py-6 text-sm text-zinc-600 ring-1 ring-zinc-200">
           Loading stores...
         </p>
       ) : null}
       {error ? (
-        <p className="mt-3 rounded-2xl bg-red-50 px-4 py-6 text-sm text-red-700 ring-1 ring-red-200">
+        <p className="mt-3 break-words rounded-2xl bg-red-50 px-4 py-6 text-sm text-red-700 ring-1 ring-red-200">
           Unable to load stores. {error}
         </p>
       ) : null}
 
       {isFavoriteListEmpty ? (
         <div
-          className="relative mt-4 overflow-hidden rounded-3xl bg-gradient-to-br from-[#fce7f3] via-[#faf5ff] to-[#e0e7ff] px-6 py-14 text-center shadow-[0_20px_60px_-15px_rgba(219,39,119,0.35)] ring-2 ring-white/80"
+          className="relative mt-4 overflow-hidden rounded-3xl bg-gradient-to-br from-[#fce7f3] via-[#faf5ff] to-[#e0e7ff] px-4 py-10 text-center shadow-[0_20px_60px_-15px_rgba(219,39,119,0.35)] ring-2 ring-white/80 sm:px-6 sm:py-14"
           role="status"
           aria-live="polite"
         >
@@ -116,7 +116,7 @@ export default function StoreListView({
             className="pointer-events-none absolute -bottom-12 -right-12 h-44 w-44 rounded-full bg-[#a855f7]/30 blur-3xl"
             aria-hidden
           />
-          <p className="relative text-2xl font-black tracking-tight text-zinc-900 sm:text-3xl">
+          <p className="relative text-xl font-black tracking-tight text-zinc-900 sm:text-3xl">
             <span className="bg-gradient-to-r from-[#f97316] via-[#e11d48] to-[#7c3aed] bg-clip-text text-transparent drop-shadow-sm">
               Un-oh!
             </span>{" "}
@@ -124,7 +124,7 @@ export default function StoreListView({
               You don&apos;t have any favorite store yet ;(
             </span>
           </p>
-          <p className="relative mt-3 text-sm font-medium text-zinc-600 sm:text-base">
+          <p className="relative mt-3 break-words text-sm font-medium text-zinc-600 sm:text-base">
             Tap the{" "}
             <span className="font-semibold text-zinc-800">+</span> button to add
             your first Instagram shop.
@@ -140,7 +140,7 @@ export default function StoreListView({
 
       {!isFavoriteListEmpty && !showSearchNoResults ? (
         viewMode === "grid" ? (
-          <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+          <div className="mt-4 grid min-w-0 grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
             {stores.map((item) => (
               <StoreCard
                 key={item.id}
@@ -153,11 +153,11 @@ export default function StoreListView({
           </div>
         ) : (
           <div
-            className="mt-4 rounded-2xl bg-zinc-50 p-5 text-zinc-700 ring-1 ring-zinc-200"
+            className="mt-4 min-w-0 overflow-hidden rounded-2xl bg-zinc-50 p-3 text-zinc-700 ring-1 ring-zinc-200 sm:p-5"
             role="region"
             aria-label="Map view"
           >
-            <h2 className="text-lg font-semibold text-zinc-900">
+            <h2 className="text-base font-semibold text-zinc-900 sm:text-lg">
               Store Map View
             </h2>
             <p className="pt-1 text-sm text-zinc-600">
@@ -166,7 +166,7 @@ export default function StoreListView({
             {isSettingsLoading ? (
               <p className="mt-4 text-sm text-zinc-600">Loading map settings...</p>
             ) : settingsError ? (
-              <p className="mt-4 text-sm text-red-700">
+              <p className="mt-4 break-words text-sm text-red-700">
                 Unable to load map settings. {settingsError}
               </p>
             ) : (

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Poppins } from "next/font/google";
 import "./globals.css";
 // The following import prevents a Font Awesome icon server-side rendering bug,
@@ -27,14 +27,25 @@ export const metadata: Metadata = {
   description: "Storebook grid and map view",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${poppins.variable} h-full`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html
+      lang="en"
+      className={`${inter.variable} ${poppins.variable} h-full overflow-x-hidden`}
+    >
+      <body className="flex min-h-full flex-col overflow-x-hidden">
+        {children}
+      </body>
     </html>
   );
 }

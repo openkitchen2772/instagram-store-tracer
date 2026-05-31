@@ -67,40 +67,12 @@ app.add_middleware(
 )
 
 # Path operation logic
-@app.get("/store_profile/{username}", response_model=StoreDTO)
-async def get_store_profile(username: str) -> StoreDTO:
-    normalized_username = username.strip().lstrip("@")
-    if normalized_username == "":
-        raise HTTPException(status_code=400, detail="Username is required.")
-
-    stores_collection: Collection[Any] = app.state.stores_collection
-    logger.info(
-        "Store profile lookup started for username '%s'.",
-        normalized_username,
-    )
-    store_record = stores_collection.find_one({"username": normalized_username})
-    if store_record is None:
-        logger.info(
-            "Store profile lookup returned no document for username '%s'.",
-            normalized_username,
-        )
-        raise HTTPException(status_code=404, detail="Store profile not found.")
-
-    source_record = dict(store_record)
-    mongo_object_id = str(source_record.pop("_id", "") or "")
-    logger.info(
-        "Store profile lookup succeeded for username '%s' with object_id '%s'.",
-        normalized_username,
-        mongo_object_id,
-    )
-    return StoreDTO.from_store(Store(**source_record), object_id=mongo_object_id)
-
-
 @app.get("/settings", response_model=ClientSettings)
 async def get_client_settings() -> ClientSettings:
     return ClientSettings(
         googleMapsApiKey=os.getenv("GOOGLE_MAPS_API_KEY", ""),
     )
+
 
 @app.post("/create_bookmark")
 async def create_bookmark(payload: BookmarksAdd) -> ResponseBase[dict[str, str]]:
@@ -146,6 +118,36 @@ async def get_bookmarks(bookmarks_uuid: str) -> ResponseBase[BookmarksDTO]:
         message="Bookmarks lookup successful.",
         data=bookmarks_data,
     )
+
+
+@app.get("/store_profile/{username}", response_model=StoreDTO)
+async def get_store_profile(username: str) -> StoreDTO:
+    normalized_username = username.strip().lstrip("@")
+    if normalized_username == "":
+        raise HTTPException(status_code=400, detail="Username is required.")
+
+    stores_collection: Collection[Any] = app.state.stores_collection
+    logger.info(
+        "Store profile lookup started for username '%s'.",
+        normalized_username,
+    )
+    store_record = stores_collection.find_one({"username": normalized_username})
+    if store_record is None:
+        logger.info(
+            "Store profile lookup returned no document for username '%s'.",
+            normalized_username,
+        )
+        raise HTTPException(status_code=404, detail="Store profile not found.")
+
+    source_record = dict(store_record)
+    mongo_object_id = str(source_record.pop("_id", "") or "")
+    logger.info(
+        "Store profile lookup succeeded for username '%s' with object_id '%s'.",
+        normalized_username,
+        mongo_object_id,
+    )
+    return StoreDTO.from_store(Store(**source_record), object_id=mongo_object_id)
+
 
 @app.post("/add_store")
 async def add_store_profile(
@@ -421,6 +423,7 @@ async def delete_store_profile(payload: StoreDelete) -> ResponseBase[dict[str, s
     )
 
 
+# testing operations
 @app.post("/ai_generate_store_info")
 async def ai_generate_store_info(
     payload: StoreAIGenerate,
@@ -443,11 +446,12 @@ async def ai_generate_store_info(
         message="Store AI generation started in the background.",
     )
 
-# testing operations
+
 @app.get("/profile/{page_name}")
 async def get_page_profile(page_name: str):
     result, _ = await request_rapid_api_profile(page_name)
     return result
+
 
 @app.get("/stores", response_model=list[StoreDTO])
 async def get_store_items(skip: int = 0, limit: int = 0) -> list[StoreDTO]:
