@@ -78,6 +78,25 @@ async def download_store_logo(logo_url: str, store_id: str, trace_id: str) -> tu
         )
         return None, "Logo image download failed: unable to write image file to local storage."
 
+
+def map_store_from_rapid_api_result(result: dict[str, Any]) -> Store:
+    """Extract a Store model from a Rapid API profile lookup response payload."""
+    source_profile: dict[str, Any] = result
+    result_container = result.get("result")
+    if isinstance(result_container, list) and len(result_container) > 0 and isinstance(
+        result_container[0], dict
+    ):
+        candidate_user = result_container[0].get("user")
+        source_profile = candidate_user if isinstance(candidate_user, dict) else result_container[0]
+    elif isinstance(result_container, dict):
+        candidate_user = result_container.get("user")
+        source_profile = candidate_user if isinstance(candidate_user, dict) else result_container
+
+    mapped_profile = Store()
+    mapped_profile.update_from_source_profile(source_profile)
+    return mapped_profile
+
+
 def store_info_generation_task(gemini_client: GeminiService, username: str) -> None:
     """Generate store AI data via Gemini, then upsert results into MongoDB."""
     trace_id = str(uuid4())
@@ -261,3 +280,88 @@ def upsert_store_from_ai_data(
             str(error),
         )
         return None, False, "Database operation failed while saving AI-generated store data.", ""
+
+
+def get_store_by_username(
+    username: str,
+) -> tuple[Store | None, str | None, str]:
+    """Load a store document from the store collection by Instagram username."""
+    normalized_username = username.strip().lstrip("@")
+    if normalized_username == "":
+        return None, "Store lookup rejected: username is required.", ""
+
+    logger.info(
+        "DB operation start: store lookup for username '%s'.",
+        normalized_username,
+    )
+
+    try:
+        mongo_db = get_mongo_db()
+        stores_collection = mongo_db[CollectionName.STORE.value]
+        username_pattern = f"^{re.escape(normalized_username)}$"
+        store_record = stores_collection.find_one(
+            {"username": {"$regex": username_pattern, "$options": "i"}},
+        )
+        if store_record is None:
+            logger.info(
+                "DB operation result: no store found for username '%s'.",
+                normalized_username,
+            )
+            return None, "Store not found.", ""
+
+        mongo_object_id = str(store_record.get("_id", "") or "")
+        store = Store(**dict(store_record))
+        logger.info(
+            "DB operation result: store lookup succeeded for username '%s' with object_id '%s'.",
+            store.username,
+            mongo_object_id,
+        )
+        return store, None, mongo_object_id
+    except PyMongoError as error:
+        logger.error(
+            "DB operation failed during store lookup for username '%s': %s",
+            normalized_username,
+            str(error),
+        )
+        return None, "Database operation failed while retrieving store.", ""
+
+
+def get_store_by_api_id(
+    api_id: str,
+) -> tuple[Store | None, str | None, str]:
+    """Load a store document from the store collection by its API profile id field."""
+    normalized_api_id = api_id.strip()
+    if normalized_api_id == "":
+        return None, "Store lookup rejected: api id is required.", ""
+
+    logger.info(
+        "DB operation start: store lookup for api id '%s'.",
+        normalized_api_id,
+    )
+
+    try:
+        mongo_db = get_mongo_db()
+        stores_collection = mongo_db[CollectionName.STORE.value]
+        store_record = stores_collection.find_one({"id": normalized_api_id})
+        if store_record is None:
+            logger.info(
+                "DB operation result: no store found for api id '%s'.",
+                normalized_api_id,
+            )
+            return None, "Store not found.", ""
+
+        mongo_object_id = str(store_record.get("_id", "") or "")
+        store = Store(**dict(store_record))
+        logger.info(
+            "DB operation result: store lookup succeeded for api id '%s' with object_id '%s'.",
+            store.id,
+            mongo_object_id,
+        )
+        return store, None, mongo_object_id
+    except PyMongoError as error:
+        logger.error(
+            "DB operation failed during store lookup for api id '%s': %s",
+            normalized_api_id,
+            str(error),
+        )
+        return None, "Database operation failed while retrieving store.", ""

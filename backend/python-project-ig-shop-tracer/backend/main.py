@@ -1,5 +1,6 @@
 import os
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
@@ -14,20 +15,26 @@ from schemas.settings import ClientSettings
 from dtos.store import StoreDTO
 from models.collections import CollectionName
 from services.database import close_mongo_connection, get_mongo_db
+from services.bookmarks import add_store_to_bookmark
 from services.bookmarks import create_bookmark as create_bookmark_in_db
 from services.bookmarks import get_bookmarks as get_bookmarks_from_db
 from services.bookmarks import remove_store_from_bookmarks
 from models.store import Store
 from pymongo.collection import Collection
-from pymongo.errors import PyMongoError
 from schemas.bookmarks import BookmarksAdd
 from schemas.base import ResponseBase
 from schemas.store import StoreAdd, StoreAIGenerate, StoreDelete
 from utils.logger import logger
 from config.settings import settings
-from services.store import download_store_logo
+from services.store import (
+    create_store,
+    download_store_logo,
+    get_store_by_api_id,
+    get_store_by_username,
+    map_store_from_rapid_api_result,
+    store_info_generation_task,
+)
 from api.rapid import request_rapid_api_profile
-from services.store import store_info_generation_task
 
 # Global env var
 RAPID_API_KEY = settings.RAPID_API_KEY
@@ -78,10 +85,7 @@ async def get_client_settings() -> ClientSettings:
 async def create_bookmark(payload: BookmarksAdd) -> ResponseBase[dict[str, str]]:
     bookmarks_uuid = payload.uuid.strip()
     response_payload = {"uuid": bookmarks_uuid}
-    created_bookmarks, error_message = create_bookmark_in_db(
-        bookmarks_uuid=bookmarks_uuid,
-        logger=logger,
-    )
+    created_bookmarks, error_message = create_bookmark_in_db(bookmarks_uuid)
     if created_bookmarks is None:
         return ResponseBase[dict[str, str]](
             payload=response_payload,
@@ -101,10 +105,7 @@ async def create_bookmark(payload: BookmarksAdd) -> ResponseBase[dict[str, str]]
 async def get_bookmarks(bookmarks_uuid: str) -> ResponseBase[BookmarksDTO]:
     normalized_uuid = bookmarks_uuid.strip()
     response_payload = {"uuid": normalized_uuid}
-    bookmarks_data, error_message = get_bookmarks_from_db(
-        bookmarks_uuid=normalized_uuid,
-        logger=logger,
-    )
+    bookmarks_data, error_message = get_bookmarks_from_db(normalized_uuid)
     if bookmarks_data is None:
         return ResponseBase[BookmarksDTO](
             payload=response_payload,
@@ -122,31 +123,13 @@ async def get_bookmarks(bookmarks_uuid: str) -> ResponseBase[BookmarksDTO]:
 
 @app.get("/store_profile/{username}", response_model=StoreDTO)
 async def get_store_profile(username: str) -> StoreDTO:
-    normalized_username = username.strip().lstrip("@")
-    if normalized_username == "":
-        raise HTTPException(status_code=400, detail="Username is required.")
+    store, error_message, mongo_object_id = get_store_by_username(username)
+    if store is None:
+        if error_message == "Store not found.":
+            raise HTTPException(status_code=404, detail="Store profile not found.")
+        raise HTTPException(status_code=400, detail=error_message or "Unable to load store profile.")
 
-    stores_collection: Collection[Any] = app.state.stores_collection
-    logger.info(
-        "Store profile lookup started for username '%s'.",
-        normalized_username,
-    )
-    store_record = stores_collection.find_one({"username": normalized_username})
-    if store_record is None:
-        logger.info(
-            "Store profile lookup returned no document for username '%s'.",
-            normalized_username,
-        )
-        raise HTTPException(status_code=404, detail="Store profile not found.")
-
-    source_record = dict(store_record)
-    mongo_object_id = str(source_record.pop("_id", "") or "")
-    logger.info(
-        "Store profile lookup succeeded for username '%s' with object_id '%s'.",
-        normalized_username,
-        mongo_object_id,
-    )
-    return StoreDTO.from_store(Store(**source_record), object_id=mongo_object_id)
+    return StoreDTO.from_store(store, object_id=mongo_object_id)
 
 
 @app.post("/add_store")
@@ -154,233 +137,40 @@ async def add_store_profile(
     payload: StoreAdd,
     background_tasks: BackgroundTasks,
 ) -> ResponseBase[Store]:
-    add_store_started_at = perf_counter()
-    trace_id = str(uuid4())
+    """Add an Instagram store to a user's bookmark list."""
     page_name = payload.username.strip()
-    bookmarks_uuid = payload.uuid.strip()
-    response_payload = {"query_store_name": page_name}
-    logger.info("[trace_id=%s] Add store request started for username '%s'.", trace_id, page_name)
-
-    if page_name == "":
-        return ResponseBase[Store](
-            payload=response_payload,
-            success=False,
-            message="Instagram store lookup rejected: username is required. Provide a valid Instagram username and try again.",
-        )
-    if bookmarks_uuid == "":
-        return ResponseBase[Store](
-            payload=response_payload,
-            success=False,
-            message="Store add rejected: bookmarks uuid is required.",
-        )
-
-    mongo_db = get_mongo_db()
-    stores_collection = mongo_db[CollectionName.STORE.value]
+    ctx = _AddStoreRequestContext(
+        trace_id=str(uuid4()),
+        started_at=perf_counter(),
+        page_name=page_name,
+        bookmarks_uuid=payload.uuid.strip(),
+        response_payload={"query_store_name": page_name},
+    )
     logger.info(
-        "[trace_id=%s] Checking for existing store by username '%s' before external profile lookup.",
-        trace_id,
-        page_name,
+        "[trace_id=%s] Add store request started for username '%s'.",
+        ctx.trace_id,
+        ctx.page_name,
     )
-    existing_store_by_username = stores_collection.find_one({"username": page_name})
-    if existing_store_by_username is not None:
-        existing_store_object_id = existing_store_by_username.get("_id")
-        if existing_store_object_id is None:
-            return ResponseBase[Store](
-                payload=response_payload,
-                success=False,
-                message="Store exists but has no valid object id for bookmark linkage.",
-            )
-        bookmarks_collection = mongo_db[CollectionName.BOOKMARKS.value]
-        bookmark_update_result = bookmarks_collection.update_one(
-            {"uuid": bookmarks_uuid},
-            {"$addToSet": {"store_ids": existing_store_object_id}},
-        )
-        if bookmark_update_result.matched_count == 0:
-            total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
-            logger.warning(
-                "[trace_id=%s] Add store request failed: bookmarks not found for uuid '%s' in %.2f ms.",
-                trace_id,
-                bookmarks_uuid,
-                total_elapsed_ms,
-            )
-            return ResponseBase[Store](
-                payload=response_payload,
-                success=False,
-                message="Store already exists, but bookmarks document was not found for the provided uuid.",
-            )
 
-        existing_store_without_object_id = dict(existing_store_by_username)
-        existing_store_without_object_id.pop("_id", None)
-        total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
-        logger.info(
-            "[trace_id=%s] Add store request used existing store document for username '%s' in %.2f ms.",
-            trace_id,
-            page_name,
-            total_elapsed_ms,
-        )
-        return ResponseBase[Store](
-            payload=response_payload,
-            success=True,
-            message="Store already bookmarked." if bookmark_update_result.modified_count == 0 else "Store was added to bookmarks.",
-            data=Store(**existing_store_without_object_id),
-        )
+    if validation_error := _validate_add_store_input(
+        ctx.page_name,
+        ctx.bookmarks_uuid,
+        ctx.response_payload,
+    ):
+        return validation_error
 
-    result, error_message = await request_rapid_api_profile(page_name, trace_id=trace_id)
-    if result is None:
-        total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
-        logger.warning(
-            "[trace_id=%s] Add store request failed during profile lookup for username '%s' in %.2f ms.",
-            trace_id,
-            page_name,
-            total_elapsed_ms,
-        )
-        return ResponseBase[Store](
-            payload=response_payload,
-            success=False,
-            message=error_message or "Instagram store lookup failed: unknown error.",
-        )
+    if existing_response := _try_bookmark_existing_store_by_username(ctx):
+        return existing_response
 
-    source_profile: dict[str, Any] = result
-    result_container = result.get("result")
-    if isinstance(result_container, list) and len(result_container) > 0 and isinstance(result_container[0], dict):
-        candidate_user = result_container[0].get("user")
-        if isinstance(candidate_user, dict):
-            source_profile = candidate_user
-        else:
-            source_profile = result_container[0]
-    elif isinstance(result_container, dict):
-        candidate_user = result_container.get("user")
-        if isinstance(candidate_user, dict):
-            source_profile = candidate_user
-        else:
-            source_profile = result_container
+    mapped_profile, fetch_error = await _fetch_store_from_rapid_api(ctx)
+    if fetch_error is not None:
+        return fetch_error
 
-    mapped_profile = Store()
-    mapped_profile.update_from_source_profile(source_profile)
-
-    if mapped_profile.id == "":
-        return ResponseBase[Store](
-            payload=response_payload,
-            success=False,
-            message="Instagram store lookup completed but no usable profile was found. Verify the username and ensure the account is accessible.",
-        )
-
-    existing_profile = stores_collection.find_one({"id": mapped_profile.id})
-    if existing_profile is not None:
-        existing_store_object_id = existing_profile.get("_id")
-        if existing_store_object_id is None:
-            return ResponseBase[Store](
-                payload=response_payload,
-                success=False,
-                message="Store exists but has no valid object id for bookmark linkage.",
-            )
-        bookmarks_collection = mongo_db[CollectionName.BOOKMARKS.value]
-        bookmark_update_result = bookmarks_collection.update_one(
-            {"uuid": bookmarks_uuid},
-            {"$addToSet": {"store_ids": existing_store_object_id}},
-        )
-        if bookmark_update_result.matched_count == 0:
-            total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
-            logger.warning(
-                "[trace_id=%s] Add store request failed: bookmarks not found for uuid '%s' in %.2f ms.",
-                trace_id,
-                bookmarks_uuid,
-                total_elapsed_ms,
-            )
-            return ResponseBase[Store](
-                payload=response_payload,
-                success=False,
-                message="Store already exists, but bookmarks document was not found for the provided uuid.",
-            )
-
-        existing_profile_without_object_id = dict(existing_profile)
-        existing_profile_without_object_id.pop("_id", None)
-        total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
-        logger.info(
-            "[trace_id=%s] Add store request skipped because store id '%s' already exists in %.2f ms.",
-            trace_id,
-            mapped_profile.id,
-            total_elapsed_ms,
-        )
-        return ResponseBase[Store](
-            payload=response_payload,
-            success=True,
-            message="Store already bookmarked." if bookmark_update_result.modified_count == 0 else "Store was added to bookmarks.",
-            data=Store(**existing_profile_without_object_id),
-        )
-
-    local_logo_path, logo_download_error = await download_store_logo(
-        logo_url=mapped_profile.hd_profile_pic_url,
-        store_id=mapped_profile.id,
-        trace_id=trace_id,
-    )
-    if local_logo_path is None:
-        total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
-        logger.warning(
-            "[trace_id=%s] Add store request failed during logo download for username '%s' in %.2f ms.",
-            trace_id,
-            page_name,
-            total_elapsed_ms,
-        )
-        return ResponseBase[Store](
-            payload=response_payload,
-            success=False,
-            message=logo_download_error or "Logo image download failed.",
-            data=mapped_profile,
-        )
-    mapped_profile.local_logo_path = local_logo_path
-
-    try:
-        insert_result = stores_collection.insert_one(mapped_profile.model_dump())
-    except PyMongoError as error:
-        total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
-        logger.warning(
-            "[trace_id=%s] Add store request failed during database insert for username '%s' in %.2f ms.",
-            trace_id,
-            page_name,
-            total_elapsed_ms,
-        )
-        return ResponseBase[Store](
-            payload=response_payload,
-            success=False,
-            message=f"Instagram store lookup succeeded, but persisting profile data to database failed. {str(error) or 'Please try again later.'}",
-            data=mapped_profile,
-        )
-
-    bookmarks_collection = mongo_db[CollectionName.BOOKMARKS.value]
-    bookmark_update_result = bookmarks_collection.update_one(
-        {"uuid": bookmarks_uuid},
-        {"$addToSet": {"store_ids": insert_result.inserted_id}},
-    )
-    if bookmark_update_result.matched_count == 0:
-        total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
-        logger.warning(
-            "[trace_id=%s] Add store request failed: bookmarks not found for uuid '%s' in %.2f ms.",
-            trace_id,
-            bookmarks_uuid,
-            total_elapsed_ms,
-        )
-        return ResponseBase[Store](
-            payload=response_payload,
-            success=False,
-            message="Store profile was saved, but bookmarks document was not found for the provided uuid.",
-            data=mapped_profile,
-        )
-
-    background_tasks.add_task(store_info_generation_task, app.state.gemini_client, page_name)
-
-    total_elapsed_ms = (perf_counter() - add_store_started_at) * 1000
-    logger.info(
-        "[trace_id=%s] Add store request completed successfully for username '%s' in %.2f ms.",
-        trace_id,
-        page_name,
-        total_elapsed_ms,
-    )
-    return ResponseBase[Store](
-        payload=response_payload,
-        success=True,
-        message="Store profile added and bookmarked successfully.",
-        data=mapped_profile,
+    return await _create_store_and_bookmark(
+        mapped_profile,
+        ctx,
+        background_tasks,
+        app.state.gemini_client,
     )
 
 
@@ -406,7 +196,6 @@ async def delete_store_profile(payload: StoreDelete) -> ResponseBase[dict[str, s
     removed, error_message = remove_store_from_bookmarks(
         bookmarks_uuid=bookmarks_uuid,
         store_id=store_id,
-        logger=logger,
     )
     if not removed:
         return ResponseBase[dict[str, str]](
@@ -420,6 +209,218 @@ async def delete_store_profile(payload: StoreDelete) -> ResponseBase[dict[str, s
         success=True,
         message="Store removed from bookmarks successfully.",
         data={"uuid": bookmarks_uuid, "store_id": store_id},
+    )
+
+
+# internal functions
+@dataclass(frozen=True)
+class _AddStoreRequestContext:
+    trace_id: str
+    started_at: float
+    page_name: str
+    bookmarks_uuid: str
+    response_payload: dict[str, str]
+
+    def elapsed_ms(self) -> float:
+        return (perf_counter() - self.started_at) * 1000
+
+
+def _validate_add_store_input(
+    page_name: str,
+    bookmarks_uuid: str,
+    response_payload: dict[str, str],
+) -> ResponseBase[Store] | None:
+    if page_name == "":
+        return ResponseBase[Store](
+            payload=response_payload,
+            success=False,
+            message=(
+                "Instagram store lookup rejected: username is required. "
+                "Provide a valid Instagram username and try again."
+            ),
+        )
+    if bookmarks_uuid == "":
+        return ResponseBase[Store](
+            payload=response_payload,
+            success=False,
+            message="Store add rejected: bookmarks uuid is required.",
+        )
+    return None
+
+
+def _bookmark_link_failure_message(bookmark_error: str | None) -> str:
+    if bookmark_error == "Bookmarks not found.":
+        return (
+            "Store already exists, but bookmarks document was not found "
+            "for the provided uuid."
+        )
+    return bookmark_error or "Unable to add store to bookmarks."
+
+
+def _link_store_to_bookmarks(
+    store: Store,
+    mongo_object_id: str,
+    ctx: _AddStoreRequestContext,
+    completion_log: str,
+) -> ResponseBase[Store]:
+    if mongo_object_id == "":
+        return ResponseBase[Store](
+            payload=ctx.response_payload,
+            success=False,
+            message="Store exists but has no valid object id for bookmark linkage.",
+        )
+
+    bookmarked, bookmark_error, already_bookmarked = add_store_to_bookmark(
+        mongo_object_id,
+        ctx.bookmarks_uuid,
+    )
+    if not bookmarked:
+        logger.warning(
+            "[trace_id=%s] Add store request failed: %s in %.2f ms.",
+            ctx.trace_id,
+            bookmark_error or "bookmark update failed",
+            ctx.elapsed_ms(),
+        )
+        return ResponseBase[Store](
+            payload=ctx.response_payload,
+            success=False,
+            message=_bookmark_link_failure_message(bookmark_error),
+        )
+
+    logger.info("[trace_id=%s] %s in %.2f ms.", ctx.trace_id, completion_log, ctx.elapsed_ms())
+    return ResponseBase[Store](
+        payload=ctx.response_payload,
+        success=True,
+        message=(
+            "Store already bookmarked."
+            if already_bookmarked
+            else "Store was added to bookmarks."
+        ),
+        data=store,
+    )
+
+
+def _try_bookmark_existing_store_by_username(
+    ctx: _AddStoreRequestContext,
+) -> ResponseBase[Store] | None:
+    existing_store, _, mongo_object_id = get_store_by_username(ctx.page_name)
+    if existing_store is None:
+        return None
+    return _link_store_to_bookmarks(
+        existing_store,
+        mongo_object_id,
+        ctx,
+        completion_log=(
+            f"Add store request used existing store document for username '{ctx.page_name}'"
+        ),
+    )
+
+
+async def _fetch_store_from_rapid_api(
+    ctx: _AddStoreRequestContext,
+) -> tuple[Store | None, ResponseBase[Store] | None]:
+    result, error_message = await request_rapid_api_profile(ctx.page_name, trace_id=ctx.trace_id)
+    if result is None:
+        logger.warning(
+            "[trace_id=%s] Add store request failed during profile lookup for username '%s' in %.2f ms.",
+            ctx.trace_id,
+            ctx.page_name,
+            ctx.elapsed_ms(),
+        )
+        return None, ResponseBase[Store](
+            payload=ctx.response_payload,
+            success=False,
+            message=error_message or "Instagram store lookup failed: unknown error.",
+        )
+
+    mapped_profile = map_store_from_rapid_api_result(result)
+    if mapped_profile.id == "":
+        return None, ResponseBase[Store](
+            payload=ctx.response_payload,
+            success=False,
+            message=(
+                "Instagram store lookup completed but no usable profile was found. "
+                "Verify the username and ensure the account is accessible."
+            ),
+        )
+    return mapped_profile, None
+
+
+async def _create_store_and_bookmark(
+    mapped_profile: Store,
+    ctx: _AddStoreRequestContext,
+    background_tasks: BackgroundTasks,
+    gemini_client: GeminiService,
+) -> ResponseBase[Store]:
+    local_logo_path, logo_download_error = await download_store_logo(
+        logo_url=mapped_profile.hd_profile_pic_url,
+        store_id=mapped_profile.id,
+        trace_id=ctx.trace_id,
+    )
+    if local_logo_path is None:
+        logger.warning(
+            "[trace_id=%s] Add store request failed during logo download for username '%s' in %.2f ms.",
+            ctx.trace_id,
+            ctx.page_name,
+            ctx.elapsed_ms(),
+        )
+        return ResponseBase[Store](
+            payload=ctx.response_payload,
+            success=False,
+            message=logo_download_error or "Logo image download failed.",
+            data=mapped_profile,
+        )
+    mapped_profile.local_logo_path = local_logo_path
+
+    saved, save_error = create_store(mapped_profile.model_dump(), logger)
+    if not saved:
+        logger.warning(
+            "[trace_id=%s] Add store request failed during database insert for username '%s' in %.2f ms.",
+            ctx.trace_id,
+            ctx.page_name,
+            ctx.elapsed_ms(),
+        )
+        return ResponseBase[Store](
+            payload=ctx.response_payload,
+            success=False,
+            message=(
+                "Instagram store lookup succeeded, but persisting profile data to database failed. "
+                f"{save_error or 'Please try again later.'}"
+            ),
+            data=mapped_profile,
+        )
+
+    _, _, mongo_object_id = get_store_by_api_id(mapped_profile.id)
+    bookmarked, bookmark_error, _ = add_store_to_bookmark(mongo_object_id, ctx.bookmarks_uuid)
+    if not bookmarked:
+        logger.warning(
+            "[trace_id=%s] Add store request failed: bookmarks not found for uuid '%s' in %.2f ms.",
+            ctx.trace_id,
+            ctx.bookmarks_uuid,
+            ctx.elapsed_ms(),
+        )
+        return ResponseBase[Store](
+            payload=ctx.response_payload,
+            success=False,
+            message=(
+                bookmark_error
+                or "Store profile was saved, but bookmarks document was not found for the provided uuid."
+            ),
+            data=mapped_profile,
+        )
+
+    background_tasks.add_task(store_info_generation_task, gemini_client, ctx.page_name)
+    logger.info(
+        "[trace_id=%s] Add store request completed successfully for username '%s' in %.2f ms.",
+        ctx.trace_id,
+        ctx.page_name,
+        ctx.elapsed_ms(),
+    )
+    return ResponseBase[Store](
+        payload=ctx.response_payload,
+        success=True,
+        message="Store profile added and bookmarked successfully.",
+        data=mapped_profile,
     )
 
 

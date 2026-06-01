@@ -12,12 +12,14 @@ alwaysApply: false
 - Prefer concrete and readable types from `typing` when needed.
 - Avoid introducing untyped new functions unless explicitly requested.
 
-# database operations rule
-- always add logging for any database operation
+# database operations and services rule
+- Always add logging for any database operation
+- When any operation functions need to operate database for data, try to first find and re-use the existing db service functions from files in /services/, to see if the target data can already be satisified by the existing db service functions, if not, then create a new db service function, which should be reusable enough for other operations (e.g. like get_store_by_username, instead of too specialized purpose one get_all_bakery_stores) 
 
 # FastAPI API interface
 - Use JSON to communicate between front-end and back-end
 - Make DTO for reusable objects or entities and for Pydantic data validation
+- Always return db entity object as DTO object as path operation response instead of directly returning the raw and full entity object, if a entity object does not have a DTO class yet, create it
 
 Example:
 

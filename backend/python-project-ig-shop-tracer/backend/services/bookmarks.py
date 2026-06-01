@@ -1,5 +1,3 @@
-import logging
-from typing import Any
 from uuid import uuid4
 
 from bson import ObjectId
@@ -10,11 +8,11 @@ from models.collections import CollectionName
 from models.store import Store
 from pymongo.errors import PyMongoError
 from services.database import get_mongo_db
+from utils.logger import logger
 
 
 def create_bookmark(
     bookmarks_uuid: str,
-    logger: logging.Logger,
 ) -> tuple[Bookmarks | None, str | None]:
     normalized_uuid = bookmarks_uuid.strip()
     if normalized_uuid == "":
@@ -38,7 +36,6 @@ def create_bookmark(
 
 def get_bookmarks(
     bookmarks_uuid: str,
-    logger: logging.Logger,
 ) -> tuple[BookmarksDTO | None, str | None]:
     normalized_uuid = bookmarks_uuid.strip()
     if normalized_uuid == "":
@@ -96,7 +93,6 @@ def get_bookmarks(
 def remove_store_from_bookmarks(
     bookmarks_uuid: str,
     store_id: str,
-    logger: logging.Logger,
 ) -> tuple[bool, str | None]:
     normalized_uuid = bookmarks_uuid.strip()
     normalized_store_id = store_id.strip()
@@ -166,3 +162,78 @@ def remove_store_from_bookmarks(
             str(error),
         )
         return False, "Database operation failed while removing store from bookmarks."
+
+
+def add_store_to_bookmark(
+    store_object_id: str,
+    bookmarks_uuid: str,
+) -> tuple[bool, str | None, bool]:
+    """Append a store MongoDB _id to the bookmark document's store_ids list.
+
+    Returns (success, error_message, already_bookmarked).
+    """
+    normalized_uuid = bookmarks_uuid.strip()
+    normalized_store_object_id = store_object_id.strip()
+    if normalized_uuid == "":
+        return False, "Bookmarks uuid is required.", False
+    if normalized_store_object_id == "":
+        return False, "Store object id is required.", False
+    if not ObjectId.is_valid(normalized_store_object_id):
+        return False, "Store object id is not valid.", False
+
+    logger.info(
+        "DB operation start: add store to bookmark uuid=%s store_object_id=%s",
+        normalized_uuid,
+        normalized_store_object_id,
+    )
+
+    try:
+        mongo_db = get_mongo_db()
+        bookmarks_collection = mongo_db[CollectionName.BOOKMARKS.value]
+        stores_collection = mongo_db[CollectionName.STORE.value]
+        resolved_object_id = ObjectId(normalized_store_object_id)
+
+        store_record = stores_collection.find_one(
+            {"_id": resolved_object_id},
+            {"_id": 1},
+        )
+        if store_record is None:
+            logger.warning(
+                "DB operation failed: store not found for object_id=%s",
+                normalized_store_object_id,
+            )
+            return False, "Store not found.", False
+
+        update_result = bookmarks_collection.update_one(
+            {"uuid": normalized_uuid},
+            {"$addToSet": {"store_ids": resolved_object_id}},
+        )
+        if update_result.matched_count == 0:
+            logger.warning(
+                "DB operation failed: bookmarks not found for uuid=%s",
+                normalized_uuid,
+            )
+            return False, "Bookmarks not found.", False
+
+        already_bookmarked = update_result.modified_count == 0
+        if already_bookmarked:
+            logger.info(
+                "DB operation result: store already in bookmark uuid=%s store_object_id=%s",
+                normalized_uuid,
+                normalized_store_object_id,
+            )
+        else:
+            logger.info(
+                "DB operation result: add store to bookmark success for uuid=%s store_object_id=%s",
+                normalized_uuid,
+                normalized_store_object_id,
+            )
+        return True, None, already_bookmarked
+    except PyMongoError as error:
+        logger.error(
+            "DB operation failed during add store to bookmark for uuid=%s store_object_id=%s: %s",
+            normalized_uuid,
+            normalized_store_object_id,
+            str(error),
+        )
+        return False, "Database operation failed while adding store to bookmarks.", False

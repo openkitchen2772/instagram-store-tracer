@@ -1,3 +1,4 @@
 front-end/nextjs-project-ig-shop-tracer/.cursor/*.log
 *.log
 /backend/python-project-ig-shop-tracer/logs
+/backend/python-project-ig-shop-tracer/backend/logs

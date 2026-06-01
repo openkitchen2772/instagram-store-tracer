@@ -44,9 +44,12 @@ if not allowed_cors_origins:
 else:
     allowed_cors_origins_list = allowed_cors_origins.split(",")
 
-project_root = Path(__file__).resolve().parent.parent.parent
+project_root = Path(__file__).resolve().parent.parent
 store_logos_folder_path = project_root / "store_logos"
 logs_folder_path = project_root / "logs"
+
+store_logos_folder_path.mkdir(parents=True, exist_ok=True)
+logs_folder_path.mkdir(parents=True, exist_ok=True)
 
 settings = Settings(
     RAPID_API_KEY=rapid_api_key,

@@ -4,7 +4,7 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 # Ensure logs folder exist or create if not
-project_root = Path(__file__).resolve().parent.parent.parent
+project_root = Path(__file__).resolve().parent.parent
 logs_folder_path = project_root / "logs"
 logs_folder_path.mkdir(parents=True, exist_ok=True)
 
