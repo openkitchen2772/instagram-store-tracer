@@ -11,12 +11,6 @@ const nextConfig: NextConfig = {
       {
         protocol: "https",
         hostname: "**.fna.fbcdn.net",
-      },
-      {
-        protocol: 'https',
-        hostname: `${process.env.BACKEND_BASE_HOSTNAME}`,
-        port: '',
-        pathname: '/**', // 允許該網域下的所有路徑
       }
     ],
   },
