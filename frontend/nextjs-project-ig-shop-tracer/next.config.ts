@@ -18,7 +18,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/backend-static/:path*',
-        destination: `https://instagram-shop-tracer.fastapicloud.dev/:path*`, 
+        destination: `${process.env.BACKEND_BASE_URL}/:path*`, 
       },
     ];
   },

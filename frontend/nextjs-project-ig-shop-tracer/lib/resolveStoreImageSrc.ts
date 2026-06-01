@@ -1,6 +1,6 @@
 import type { StoreItem } from "@/components/StoreCard";
 
-const BACKEND_ORIGIN = "/backend-static";
+const BACKEND_ORIGIN = process.env.BACKEND_BASE_URL;
 export const STORE_IMAGE_PLACEHOLDER_SRC =
   "https://dummyimage.com/480x480/e5e7eb/6b7280&text=No+Image";
 
