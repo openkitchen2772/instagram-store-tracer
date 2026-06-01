@@ -14,14 +14,6 @@ const nextConfig: NextConfig = {
       }
     ],
   },
-  async rewrites() {
-    return [
-      {
-        source: '/backend-static/:path*',
-        destination: `${process.env.BACKEND_BASE_URL}/:path*`, 
-      },
-    ];
-  },
 };
 
 export default nextConfig;
