@@ -12,6 +12,7 @@ export function resolveStoreImageSrc(item: StoreItem): string {
   const localLogoAbsoluteUrl = trimmedLocalLogoPath.startsWith("/")
     ? `${BACKEND_ORIGIN}${trimmedLocalLogoPath}`
     : `${BACKEND_ORIGIN}/${trimmedLocalLogoPath}`;
+  console.log(localLogoAbsoluteUrl);
   
   if (hasLocalLogoPath) {
     return localLogoAbsoluteUrl;
