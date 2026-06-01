@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "**.fna.fbcdn.net",
       },
+      {
+        protocol: 'https',
+        hostname: `${process.env.BACKEND_BASE_HOSTNAME}`,
+      }
     ],
   },
   async rewrites() {
