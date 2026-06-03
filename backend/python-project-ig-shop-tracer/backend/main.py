@@ -1,13 +1,11 @@
 import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
-from storage3.exceptions import StorageException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from ai.providers.gemini import GeminiClientConfig, GeminiService
@@ -30,7 +28,7 @@ from utils.logger import logger
 from config.settings import settings
 from services.store import (
     create_store,
-    download_store_logo,
+    fetch_and_upload_store_logo_background_task,
     get_store_by_api_id,
     get_store_by_username,
     map_store_from_rapid_api_result,
@@ -187,7 +185,10 @@ async def add_store_profile(
 
 
 @app.post("/renew_store")
-async def renew_store_profile(payload: StoreRenew) -> ResponseBase[Store]:
+async def renew_store_profile(
+    payload: StoreRenew,
+    background_tasks: BackgroundTasks,
+) -> ResponseBase[Store]:
     """Refresh an existing store document from Instagram profile data."""
     page_name = payload.username.strip().lstrip("@")
     ctx = _StoreUsernameRequestContext(
@@ -214,6 +215,7 @@ async def renew_store_profile(payload: StoreRenew) -> ResponseBase[Store]:
 
     return await _renew_store_profile(
         ctx,
+        background_tasks,
         app.state.supabase_storage_service,
     )
 
@@ -396,101 +398,7 @@ async def _fetch_store_from_rapid_api(
     return mapped_profile, None
 
 
-def _upload_store_logo_to_supabase(
-    supabase_storage_service: SupabaseStorageService,
-    downloaded_logo_route_path: str,
-    trace_id: str,
-) -> tuple[str | None, str | None]:
-    logo_filename = Path(downloaded_logo_route_path).name
-    if logo_filename == "":
-        return None, "Logo upload failed: invalid local logo path."
-
-    logo_absolute_path = STORE_LOGOS_FOLDER_PATH / logo_filename
-    try:
-        storage_object_path = supabase_storage_service.upload_file(str(logo_absolute_path))
-        public_url = supabase_storage_service.get_file_url(storage_object_path)
-        logger.info(
-            "[trace_id=%s] Store logo uploaded to Supabase at '%s'.",
-            trace_id,
-            storage_object_path,
-        )
-        return public_url, None
-    except FileNotFoundError:
-        logger.warning(
-            "[trace_id=%s] Logo upload failed: local file not found at '%s'.",
-            trace_id,
-            logo_absolute_path,
-        )
-        return None, "Logo upload failed: local logo file was not found."
-    except ValueError as error:
-        logger.warning(
-            "[trace_id=%s] Logo upload rejected for '%s': %s",
-            trace_id,
-            logo_absolute_path,
-            error,
-        )
-        return None, f"Logo upload failed: {error}"
-    except StorageException as error:
-        logger.warning(
-            "[trace_id=%s] Logo upload failed for '%s': %s",
-            trace_id,
-            logo_absolute_path,
-            error,
-        )
-        return None, "Logo upload failed: Supabase storage returned an error."
-
-
-async def _fetch_and_upload_store_logo(
-    mapped_profile: Store,
-    ctx: _StoreUsernameRequestContext,
-    supabase_storage_service: SupabaseStorageService,
-    request_label: str,
-) -> tuple[Store | None, ResponseBase[Store] | None]:
-    downloaded_logo_route, logo_download_error = await download_store_logo(
-        logo_url=mapped_profile.hd_profile_pic_url,
-        store_id=mapped_profile.id,
-        trace_id=ctx.trace_id,
-    )
-    if downloaded_logo_route is None:
-        logger.warning(
-            "[trace_id=%s] %s request failed during logo download for username '%s' in %.2f ms.",
-            ctx.trace_id,
-            request_label,
-            ctx.page_name,
-            ctx.elapsed_ms(),
-        )
-        return None, ResponseBase[Store](
-            payload=ctx.response_payload,
-            success=False,
-            message=logo_download_error or "Logo image download failed.",
-            data=mapped_profile,
-        )
-
-    logo_public_url, logo_upload_error = _upload_store_logo_to_supabase(
-        supabase_storage_service,
-        downloaded_logo_route,
-        ctx.trace_id,
-    )
-    if logo_public_url is None:
-        logger.warning(
-            "[trace_id=%s] %s request failed during logo upload for username '%s' in %.2f ms.",
-            ctx.trace_id,
-            request_label,
-            ctx.page_name,
-            ctx.elapsed_ms(),
-        )
-        return None, ResponseBase[Store](
-            payload=ctx.response_payload,
-            success=False,
-            message=logo_upload_error or "Logo image upload failed.",
-            data=mapped_profile,
-        )
-
-    mapped_profile.logo_image_url = logo_public_url
-    return mapped_profile, None
-
-
-def _merge_existing_store_fields_for_renew(
+def _merge_existing_store_ai_fields_for_renew(
     mapped_profile: Store,
     existing_store: Store,
 ) -> Store:
@@ -499,11 +407,13 @@ def _merge_existing_store_fields_for_renew(
     mapped_profile.store_locations = existing_store.store_locations
     mapped_profile.addresses = existing_store.addresses
     mapped_profile.created_at = existing_store.created_at
+    mapped_profile.logo_image_url = existing_store.logo_image_url
     return mapped_profile
 
 
 async def _renew_store_profile(
     ctx: _StoreUsernameRequestContext,
+    background_tasks: BackgroundTasks,
     supabase_storage_service: SupabaseStorageService,
 ) -> ResponseBase[Store]:
     existing_store, _, _ = get_store_by_username(ctx.page_name)
@@ -527,17 +437,8 @@ async def _renew_store_profile(
     if fetch_error is not None:
         return fetch_error
 
-    mapped_profile_with_logo, logo_error = await _fetch_and_upload_store_logo(
+    mapped_profile = _merge_existing_store_ai_fields_for_renew(
         mapped_profile,
-        ctx,
-        supabase_storage_service,
-        request_label="Renew store",
-    )
-    if logo_error is not None:
-        return logo_error
-
-    mapped_profile = _merge_existing_store_fields_for_renew(
-        mapped_profile_with_logo,
         existing_store,
     )
 
@@ -559,6 +460,15 @@ async def _renew_store_profile(
             data=mapped_profile,
         )
 
+    background_tasks.add_task(
+        fetch_and_upload_store_logo_background_task,
+        mapped_profile.id,
+        mapped_profile.hd_profile_pic_url,
+        ctx.page_name,
+        ctx.trace_id,
+        supabase_storage_service,
+    )
+
     renewed_store, _, _ = get_store_by_username(ctx.page_name)
     response_store = renewed_store if renewed_store is not None else mapped_profile
     logger.info(
@@ -575,6 +485,10 @@ async def _renew_store_profile(
     )
 
 
+# Create new store and bookmark logic flow: 
+# 1. create store document & add to bookmark (fast db operation)
+# 2. run background ai info generation (background to avoid user interruption by exiting page or refreshing)
+# 3. background process image and push to bucket (IO blocking operation)
 async def _create_store_and_bookmark(
     mapped_profile: Store,
     ctx: _AddStoreRequestContext,
@@ -582,16 +496,7 @@ async def _create_store_and_bookmark(
     gemini_client: GeminiService,
     supabase_storage_service: SupabaseStorageService,
 ) -> ResponseBase[Store]:
-    mapped_profile_with_logo, logo_error = await _fetch_and_upload_store_logo(
-        mapped_profile,
-        ctx,
-        supabase_storage_service,
-        request_label="Add store",
-    )
-    if logo_error is not None:
-        return logo_error
-    mapped_profile = mapped_profile_with_logo
-
+    # insert a new store document or update existing one
     saved, save_error = create_store(mapped_profile.model_dump(), logger)
     if not saved:
         logger.warning(
@@ -610,6 +515,7 @@ async def _create_store_and_bookmark(
             data=mapped_profile,
         )
 
+    # add to bookmark document "stores" set db field
     _, _, mongo_object_id = get_store_by_api_id(mapped_profile.id)
     bookmarked, bookmark_error, _ = add_store_to_bookmark(mongo_object_id, ctx.bookmarks_uuid)
     if not bookmarked:
@@ -629,7 +535,17 @@ async def _create_store_and_bookmark(
             data=mapped_profile,
         )
 
+    # run in background to ensure long round trip api operations when not be interrupted
     background_tasks.add_task(store_info_generation_task, gemini_client, ctx.page_name)
+    background_tasks.add_task(
+        fetch_and_upload_store_logo_background_task,
+        mapped_profile.id,
+        mapped_profile.hd_profile_pic_url,
+        ctx.page_name,
+        ctx.trace_id,
+        supabase_storage_service,
+    )
+
     logger.info(
         "[trace_id=%s] Add store request completed successfully for username '%s' in %.2f ms.",
         ctx.trace_id,

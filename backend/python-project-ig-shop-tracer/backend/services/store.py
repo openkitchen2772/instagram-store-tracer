@@ -3,10 +3,14 @@ import re
 import pydantic
 import httpx
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from time import perf_counter
 from uuid import uuid4
 
+from storage3.exceptions import StorageException
+
+from api.supabase import SupabaseStorageService
 from models.collections import CollectionName
 from models.store import Store
 from pymongo.errors import PyMongoError
@@ -195,11 +199,132 @@ def store_info_generation_task(gemini_client: GeminiService, username: str) -> N
         total_elapsed_ms,
     )
 
+
+async def fetch_and_upload_store_logo_background_task(
+    store_id: str,
+    hd_profile_pic_url: str,
+    username: str,
+    trace_id: str,
+    supabase_storage_service: SupabaseStorageService,
+) -> None:
+    """Download store logo, upload to Supabase, and persist logo_image_url on the store document."""
+    job_started_at = perf_counter()
+    normalized_username = username.strip().lstrip("@")
+
+    if hd_profile_pic_url.strip() == "":
+        logger.warning(
+            "[trace_id=%s] Store logo background job skipped for username '%s': no picture URL.",
+            trace_id,
+            normalized_username,
+        )
+        return
+
+    logger.info(
+        "[trace_id=%s] Store logo background job started for store_id '%s' (username '%s').",
+        trace_id,
+        store_id,
+        normalized_username,
+    )
+
+    downloaded_logo_route, logo_download_error = await download_store_logo(
+        logo_url=hd_profile_pic_url,
+        store_id=store_id,
+        trace_id=trace_id,
+    )
+    if downloaded_logo_route is None:
+        logger.warning(
+            "[trace_id=%s] Store logo background job failed during download for username '%s' in %.2f ms: %s",
+            trace_id,
+            normalized_username,
+            (perf_counter() - job_started_at) * 1000,
+            logo_download_error or "unknown error",
+        )
+        return
+
+    logo_public_url, logo_upload_error = upload_store_logo_to_supabase(
+        supabase_storage_service,
+        downloaded_logo_route,
+        trace_id,
+    )
+    if logo_public_url is None:
+        logger.warning(
+            "[trace_id=%s] Store logo background job failed during upload for username '%s' in %.2f ms: %s",
+            trace_id,
+            normalized_username,
+            (perf_counter() - job_started_at) * 1000,
+            logo_upload_error or "unknown error",
+        )
+        return
+
+    saved, save_error = update_store_logo_image_url(store_id, logo_public_url, logger)
+    if not saved:
+        logger.warning(
+            "[trace_id=%s] Store logo background job failed during database update for username '%s' in %.2f ms: %s",
+            trace_id,
+            normalized_username,
+            (perf_counter() - job_started_at) * 1000,
+            save_error or "unknown error",
+        )
+        return
+
+    logger.info(
+        "[trace_id=%s] Store logo background job completed for username '%s' in %.2f ms.",
+        trace_id,
+        normalized_username,
+        (perf_counter() - job_started_at) * 1000,
+    )
+
+
+def upload_store_logo_to_supabase(
+    supabase_storage_service: SupabaseStorageService,
+    downloaded_logo_route_path: str,
+    trace_id: str,
+) -> tuple[str | None, str | None]:
+    logo_filename = Path(downloaded_logo_route_path).name
+    if logo_filename == "":
+        return None, "Logo upload failed: invalid local logo path."
+
+    logo_absolute_path = settings.STORE_LOGOS_FOLDER_PATH / logo_filename
+    try:
+        storage_object_path = supabase_storage_service.upload_file(str(logo_absolute_path))
+        public_url = supabase_storage_service.get_file_url(storage_object_path)
+        logger.info(
+            "[trace_id=%s] Store logo uploaded to Supabase at '%s'.",
+            trace_id,
+            storage_object_path,
+        )
+        return public_url, None
+    except FileNotFoundError:
+        logger.warning(
+            "[trace_id=%s] Logo upload failed: local file not found at '%s'.",
+            trace_id,
+            logo_absolute_path,
+        )
+        return None, "Logo upload failed: local logo file was not found."
+    except ValueError as error:
+        logger.warning(
+            "[trace_id=%s] Logo upload rejected for '%s': %s",
+            trace_id,
+            logo_absolute_path,
+            error,
+        )
+        return None, f"Logo upload failed: {error}"
+    except StorageException as error:
+        logger.warning(
+            "[trace_id=%s] Logo upload failed for '%s': %s",
+            trace_id,
+            logo_absolute_path,
+            error,
+        )
+        return None, "Logo upload failed: Supabase storage returned an error."
+
+
 # Database services
 def create_store(
     profile_data: dict[str, Any],
     logger: logging.Logger,
 ) -> tuple[bool, str | None]:
+    ''' Create or update store document into store collections'''
     profile_id = str(profile_data.get("id", "") or "")
     if profile_id == "":
         return False, "Store profile is missing required id field."
@@ -306,6 +431,48 @@ def upsert_store_from_ai_data(
             str(error),
         )
         return None, False, "Database operation failed while saving AI-generated store data.", ""
+
+
+def update_store_logo_image_url(
+    store_id: str,
+    logo_image_url: str,
+    logger: logging.Logger,
+) -> tuple[bool, str | None]:
+    normalized_store_id = store_id.strip()
+    if normalized_store_id == "":
+        return False, "Store logo update rejected: store id is required."
+
+    logger.info(
+        "DB operation start: update logo_image_url for store id=%s",
+        normalized_store_id,
+    )
+    try:
+        mongo_db = get_mongo_db()
+        stores_collection = mongo_db[CollectionName.STORE.value]
+        update_result = stores_collection.update_one(
+            {"id": normalized_store_id},
+            {"$set": {"logo_image_url": logo_image_url, "updated_at": _utc_now()}},
+        )
+        if update_result.matched_count == 0:
+            logger.warning(
+                "DB operation result: no store document found for logo update, id=%s",
+                normalized_store_id,
+            )
+            return False, "Store logo update failed: store document not found."
+
+        logger.info(
+            "DB operation result: logo_image_url updated for id=%s, modified=%s",
+            normalized_store_id,
+            update_result.modified_count,
+        )
+        return True, None
+    except PyMongoError as error:
+        logger.error(
+            "DB operation failed during logo_image_url update for id=%s: %s",
+            normalized_store_id,
+            str(error),
+        )
+        return False, "Database operation failed while updating store logo URL."
 
 
 def get_store_by_username(
