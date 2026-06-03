@@ -3,12 +3,11 @@
 /**
  * StoreListView
  *
- * Renders the store collection in either grid or map-placeholder view. Also
- * handles the lightweight loading and error banners. This is the main content
- * that lives inside the storebook scroll container.
+ * Renders the store collection in grid and map views. Both stay mounted after the
+ * map is first opened so switching views does not reload the Google Map instance.
  */
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import StoreCard, { type StoreItem, type StoreLocation } from "@/components/StoreCard";
 import StoreLocationsMap, {
   type MapLocation,
@@ -62,6 +61,13 @@ export default function StoreListView({
   onDeleteStore,
   deletingStoreObjectId = null,
 }: StoreListViewProps) {
+  const mapActivatedRef = useRef(false);
+  const isMapVisible = viewMode === "map";
+  if (isMapVisible) {
+    mapActivatedRef.current = true;
+  }
+  const mapEverActivated = mapActivatedRef.current;
+
   const showSearchNoResults =
     !isLoading && !error && hasBookmarks && stores.length === 0;
 
@@ -139,8 +145,15 @@ export default function StoreListView({
       ) : null}
 
       {!isFavoriteListEmpty && !showSearchNoResults ? (
-        viewMode === "grid" ? (
-          <div className="mt-4 grid min-w-0 grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
+        <>
+          <div
+            className={
+              isMapVisible
+                ? "hidden"
+                : "mt-4 grid min-w-0 grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-4"
+            }
+            aria-hidden={isMapVisible}
+          >
             {stores.map((item) => (
               <StoreCard
                 key={item.id}
@@ -151,34 +164,42 @@ export default function StoreListView({
               />
             ))}
           </div>
-        ) : (
-          <div
-            className="mt-4 min-w-0 overflow-hidden rounded-2xl bg-zinc-50 p-3 text-zinc-700 ring-1 ring-zinc-200 sm:p-5"
-            role="region"
-            aria-label="Map view"
-          >
-            <h2 className="text-base font-semibold text-zinc-900 sm:text-lg">
-              Store Map View
-            </h2>
-            <p className="pt-1 text-sm text-zinc-600">
-              Tap a marker to open store details.
-            </p>
-            {isSettingsLoading ? (
-              <p className="mt-4 text-sm text-zinc-600">Loading map settings...</p>
-            ) : settingsError ? (
-              <p className="mt-4 break-words text-sm text-red-700">
-                Unable to load map settings. {settingsError}
+
+          {mapEverActivated ? (
+            <div
+              className={
+                isMapVisible
+                  ? "mt-4 min-w-0 overflow-hidden rounded-2xl bg-zinc-50 p-3 text-zinc-700 ring-1 ring-zinc-200 sm:p-5"
+                  : "hidden"
+              }
+              role="region"
+              aria-label="Map view"
+              aria-hidden={!isMapVisible}
+            >
+              <h2 className="text-base font-semibold text-zinc-900 sm:text-lg">
+                Store Map View
+              </h2>
+              <p className="pt-1 text-sm text-zinc-600">
+                Tap a marker to open store details.
               </p>
-            ) : (
-              <StoreLocationsMap
-                className="mt-4"
-                apiKey={googleMapsApiKey}
-                locations={mapLocations}
-                onLocationSelect={handleMapLocationSelect}
-              />
-            )}
-          </div>
-        )
+              {isSettingsLoading ? (
+                <p className="mt-4 text-sm text-zinc-600">Loading map settings...</p>
+              ) : settingsError ? (
+                <p className="mt-4 break-words text-sm text-red-700">
+                  Unable to load map settings. {settingsError}
+                </p>
+              ) : (
+                <StoreLocationsMap
+                  className="mt-4"
+                  apiKey={googleMapsApiKey}
+                  locations={mapLocations}
+                  onLocationSelect={handleMapLocationSelect}
+                  isVisible={isMapVisible}
+                />
+              )}
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

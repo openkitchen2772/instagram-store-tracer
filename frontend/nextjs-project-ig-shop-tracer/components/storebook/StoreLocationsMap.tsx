@@ -3,8 +3,10 @@
 /**
  * StoreLocationsMap
  *
- * Loads the Google Maps JavaScript API with the provided key and renders a
- * map with one marker per location. Fits bounds when multiple stores exist.
+ * Loads the Google Maps JavaScript API once and keeps the map instance mounted.
+ * Marker updates run when locations change; resize runs when the map becomes visible
+ * again after being hidden (e.g. grid/map view toggle).
+ * The user's current position is shown when browser geolocation is allowed.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -23,7 +25,11 @@ type StoreLocationsMapProps = {
   locations: MapLocation[];
   onLocationSelect?: (location: MapLocation) => void;
   className?: string;
+  /** When false, the map stays mounted but hidden; a resize is triggered when true. */
+  isVisible?: boolean;
 };
+
+type GeolocationStatus = "idle" | "watching" | "ready" | "denied" | "unavailable";
 
 function isValidCoordinate(value: number): boolean {
   return Number.isFinite(value);
@@ -36,20 +42,71 @@ function hasUsableCoordinates(location: MapLocation): boolean {
   );
 }
 
+function fitMapToVisiblePoints(
+  map: google.maps.Map,
+  storeMarkers: google.maps.Marker[],
+  userPosition: google.maps.LatLngLiteral | null,
+): void {
+  const bounds = new google.maps.LatLngBounds();
+  let pointCount = 0;
+
+  storeMarkers.forEach((marker) => {
+    const position = marker.getPosition();
+    if (position) {
+      bounds.extend(position);
+      pointCount += 1;
+    }
+  });
+
+  if (userPosition) {
+    bounds.extend(userPosition);
+    pointCount += 1;
+  }
+
+  if (pointCount === 0) {
+    return;
+  }
+
+  if (pointCount === 1) {
+    map.setCenter(bounds.getCenter());
+    map.setZoom(userPosition && storeMarkers.length === 0 ? 14 : 12);
+    return;
+  }
+
+  map.fitBounds(bounds, 64);
+}
+
+function geolocationErrorMessage(error: GeolocationPositionError): string {
+  if (error.code === error.PERMISSION_DENIED) {
+    return "Location permission denied. Enable location access to see your position on the map.";
+  }
+  if (error.code === error.POSITION_UNAVAILABLE) {
+    return "Your location is temporarily unavailable.";
+  }
+  return "Timed out while fetching your location.";
+}
+
 export default function StoreLocationsMap({
   apiKey,
   locations,
   onLocationSelect,
   className = "",
+  isVisible = true,
 }: StoreLocationsMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
+  const mapsApiRef = useRef<typeof google.maps | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
+  const userMarkerRef = useRef<google.maps.Marker | null>(null);
+  const userPositionRef = useRef<google.maps.LatLngLiteral | null>(null);
   const onLocationSelectRef = useRef(onLocationSelect);
   const [mapStatus, setMapStatus] = useState<"loading" | "ready" | "error">(
     "loading",
   );
   const [mapError, setMapError] = useState<string | null>(null);
+  const [geolocationStatus, setGeolocationStatus] =
+    useState<GeolocationStatus>("idle");
+  const [geolocationHint, setGeolocationHint] = useState<string | null>(null);
 
   const usableLocations = useMemo(
     () => locations.filter(hasUsableCoordinates),
@@ -66,6 +123,14 @@ export default function StoreLocationsMap({
         .join("|"),
     [usableLocations],
   );
+
+  const refitMapBounds = () => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+    fitMapToVisiblePoints(map, markersRef.current, userPositionRef.current);
+  };
 
   useEffect(() => {
     onLocationSelectRef.current = onLocationSelect;
@@ -89,52 +154,15 @@ export default function StoreLocationsMap({
           return;
         }
 
-        const defaultCenter = { lat: 0, lng: 0 };
+        mapsApiRef.current = mapsApi;
         const map = new mapsApi.Map(mapContainerRef.current, {
-          center: defaultCenter,
-          zoom: 2,
+          center: { lat: 22.3193, lng: 114.1694 },
+          zoom: 11,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
         });
         mapRef.current = map;
-
-        markersRef.current.forEach((marker) => marker.setMap(null));
-        markersRef.current = [];
-
-        if (usableLocations.length === 0) {
-          setMapStatus("ready");
-          return;
-        }
-
-        const bounds = new mapsApi.LatLngBounds();
-        markersRef.current = usableLocations.map((location) => {
-          const position = {
-            lat: location.latitude,
-            lng: location.longitude,
-          };
-          bounds.extend(position);
-
-          const marker = new mapsApi.Marker({
-            map,
-            position,
-            title: location.label?.trim() || location.id,
-          });
-
-          marker.addListener("click", () => {
-            onLocationSelectRef.current?.(location);
-          });
-
-          return marker;
-        });
-
-        if (usableLocations.length === 1) {
-          map.setCenter(bounds.getCenter());
-          map.setZoom(12);
-        } else {
-          map.fitBounds(bounds, 64);
-        }
-
         setMapStatus("ready");
       } catch (error) {
         if (isCancelled) {
@@ -153,9 +181,136 @@ export default function StoreLocationsMap({
       isCancelled = true;
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
+      userMarkerRef.current?.setMap(null);
+      userMarkerRef.current = null;
+      userPositionRef.current = null;
       mapRef.current = null;
+      mapsApiRef.current = null;
     };
-  }, [trimmedApiKey, locationsKey, usableLocations]);
+  }, [trimmedApiKey]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const mapsApi = mapsApiRef.current;
+    if (!map || !mapsApi || mapStatus !== "ready") {
+      return;
+    }
+
+    markersRef.current.forEach((marker) => marker.setMap(null));
+    markersRef.current = [];
+
+    markersRef.current = usableLocations.map((location) => {
+      const position = {
+        lat: location.latitude,
+        lng: location.longitude,
+      };
+
+      const marker = new mapsApi.Marker({
+        map,
+        position,
+        title: location.label?.trim() || location.id,
+      });
+
+      marker.addListener("click", () => {
+        onLocationSelectRef.current?.(location);
+      });
+
+      return marker;
+    });
+
+    refitMapBounds();
+  }, [locationsKey, mapStatus, usableLocations]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!isVisible || !map) {
+      return;
+    }
+
+    google.maps.event.trigger(map, "resize");
+    refitMapBounds();
+  }, [isVisible]);
+
+  useEffect(() => {
+    if (mapStatus !== "ready" || !isVisible) {
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      setGeolocationStatus("unavailable");
+      setGeolocationHint("Geolocation is not supported in this browser.");
+      return;
+    }
+
+    setGeolocationStatus("watching");
+    setGeolocationHint(null);
+
+    const syncUserMarker = (position: GeolocationPosition) => {
+      const latitude = position.coords.latitude;
+      const longitude = position.coords.longitude;
+      if (!isValidCoordinate(latitude) || !isValidCoordinate(longitude)) {
+        return;
+      }
+
+      const userPosition = { lat: latitude, lng: longitude };
+      userPositionRef.current = userPosition;
+
+      const map = mapRef.current;
+      const mapsApi = mapsApiRef.current;
+      if (!map || !mapsApi) {
+        return;
+      }
+
+      if (!userMarkerRef.current) {
+        userMarkerRef.current = new mapsApi.Marker({
+          map,
+          position: userPosition,
+          title: "Your location",
+          zIndex: 1000,
+          icon: {
+            path: mapsApi.SymbolPath.CIRCLE,
+            scale: 9,
+            fillColor: "#2563eb",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 2,
+          },
+        });
+      } else {
+        userMarkerRef.current.setPosition(userPosition);
+      }
+
+      setGeolocationStatus("ready");
+      setGeolocationHint(null);
+    };
+
+    const handleGeolocationError = (error: GeolocationPositionError) => {
+      setGeolocationStatus(error.code === error.PERMISSION_DENIED ? "denied" : "unavailable");
+      setGeolocationHint(geolocationErrorMessage(error));
+      userMarkerRef.current?.setMap(null);
+      userMarkerRef.current = null;
+      userPositionRef.current = null;
+    };
+
+    const watchId = navigator.geolocation.watchPosition(
+      syncUserMarker,
+      handleGeolocationError,
+      {
+        enableHighAccuracy: true,
+        maximumAge: 30_000,
+        timeout: 15_000,
+      },
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      userMarkerRef.current?.setMap(null);
+      userMarkerRef.current = null;
+      userPositionRef.current = null;
+      setGeolocationStatus("idle");
+      setGeolocationHint(null);
+    };
+  }, [isVisible, mapStatus]);
 
   if (!trimmedApiKey) {
     return (
@@ -184,9 +339,17 @@ export default function StoreLocationsMap({
       {mapStatus === "error" && mapError ? (
         <p className="mt-2 break-words text-sm text-red-700">{mapError}</p>
       ) : null}
+      {mapStatus === "ready" && geolocationStatus === "watching" ? (
+        <p className="mt-2 text-sm text-zinc-600">Finding your location...</p>
+      ) : null}
+      {mapStatus === "ready" && geolocationHint ? (
+        <p className="mt-2 break-words text-sm text-zinc-600">{geolocationHint}</p>
+      ) : null}
       {mapStatus === "ready" && usableLocations.length === 0 ? (
         <p className="mt-2 text-sm text-zinc-600">
-          No store branches with Hong Kong locations to display on the map.
+          {geolocationStatus === "ready"
+            ? "No store branches with Hong Kong locations to display. Your location is shown on the map."
+            : "No store branches with Hong Kong locations to display on the map."}
         </p>
       ) : null}
     </div>
