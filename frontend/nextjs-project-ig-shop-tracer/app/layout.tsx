@@ -23,7 +23,7 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "Instagram Shop Tracer",
+  title: "Instagram Store Tracer",
   description: "Storebook grid and map view",
 };
 
