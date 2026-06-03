@@ -660,7 +660,7 @@ async def ai_generate_store_info(
             message="Store AI generate rejected: username is required. Provide a valid Instagram username and try again.",
         )
 
-    background_tasks.add_task(store_info_generation_task, page_name)
+    background_tasks.add_task(store_info_generation_task, app.state.gemini_client, page_name)
     return ResponseBase[StoreDTO](
         payload=response_payload,
         success=True,
