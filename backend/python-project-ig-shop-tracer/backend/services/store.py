@@ -2,6 +2,7 @@ import logging
 import re
 import pydantic
 import httpx
+from datetime import datetime, timezone
 from typing import Any
 from time import perf_counter
 from uuid import uuid4
@@ -16,6 +17,26 @@ from utils.utility import infer_logo_file_extension
 from config.settings import settings
 from ai.services.store import StoreAIService
 from ai.providers.gemini import GeminiService
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _with_create_timestamps(profile_data: dict[str, Any]) -> dict[str, Any]:
+    data = dict(profile_data)
+    timestamp = _utc_now()
+    data["created_at"] = timestamp
+    data["updated_at"] = timestamp
+    return data
+
+
+def _with_update_timestamp(profile_data: dict[str, Any]) -> dict[str, Any]:
+    data = dict(profile_data)
+    data.pop("created_at", None)
+    data["updated_at"] = _utc_now()
+    return data
+
 
 # Operation services
 async def download_store_logo(logo_url: str, store_id: str, trace_id: str) -> tuple[str | None, str | None]:
@@ -113,6 +134,7 @@ def store_info_generation_task(gemini_client: GeminiService, username: str) -> N
                 "$set": {
                     "description": ai_processing_placeholder,
                     "addresses": [ai_processing_placeholder],
+                    "updated_at": _utc_now(),
                 }
             },
         )
@@ -190,7 +212,7 @@ def create_store(
         existing_profile = stores_collection.find_one({"id": profile_id}, {"_id": 1})
         if existing_profile is None:
             logger.info("DB operation: no existing profile found, inserting id=%s", profile_id)
-            insert_result = stores_collection.insert_one(profile_data)
+            insert_result = stores_collection.insert_one(_with_create_timestamps(profile_data))
             logger.info(
                 "DB operation result: insert success for id=%s, inserted_id=%s",
                 profile_id,
@@ -200,7 +222,7 @@ def create_store(
             logger.info("DB operation: profile exists, refreshing document for id=%s", profile_id)
             update_result = stores_collection.update_one(
                 {"id": profile_id},
-                {"$set": profile_data},
+                {"$set": _with_update_timestamp(profile_data)},
             )
             logger.info(
                 "DB operation result: refresh success for id=%s, matched=%s, modified=%s",
@@ -245,6 +267,7 @@ def upsert_store_from_ai_data(
             existing_store.tags = tags
             existing_store.store_locations = store_locations
             existing_store.addresses = addresses
+            existing_store.updated_at = _utc_now()
 
             update_result = stores_collection.update_one(
                 {"_id": existing_record["_id"]},
@@ -258,6 +281,7 @@ def upsert_store_from_ai_data(
             )
             return existing_store, False, None, str(existing_record["_id"])
 
+        timestamp = _utc_now()
         new_store = Store(
             id=normalized_username,
             username=normalized_username,
@@ -265,6 +289,8 @@ def upsert_store_from_ai_data(
             tags=tags,
             store_locations=store_locations,
             addresses=addresses,
+            created_at=timestamp,
+            updated_at=timestamp,
         )
         insert_result = stores_collection.insert_one(new_store.model_dump())
         logger.info(

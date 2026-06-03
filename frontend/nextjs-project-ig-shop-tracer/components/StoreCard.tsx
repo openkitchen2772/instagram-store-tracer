@@ -17,7 +17,7 @@ export type StoreItem = {
   username: string;
   fullName: string;
   imageUrl: string;
-  localLogoPath?: string;
+  logoImageUrl?: string;
   latitude: number;
   longitude: number;
   description: string;

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const BACKEND_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_BASE_URL;
+const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL;
 
 export async function GET(): Promise<NextResponse> {
   let upstreamResponse: Response;

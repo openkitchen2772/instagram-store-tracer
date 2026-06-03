@@ -6,6 +6,10 @@ class StoreAdd(BaseModel):
     uuid: str
 
 
+class StoreRenew(BaseModel):
+    username: str
+
+
 class StoreDelete(BaseModel):
     uuid: str
     store_id: str

@@ -28,7 +28,7 @@ type StoreItemApi = {
   username?: string;
   fullName?: string;
   imageUrl?: string;
-  localLogoPath?: string;
+  logoImageUrl?: string;
   latitude?: number;
   longitude?: number;
   description?: string;
@@ -123,7 +123,7 @@ export function useStores(bookmarksUuid: string | null): UseStoresResult {
         username: item.username ?? "",
         fullName: item.fullName ?? "",
         imageUrl: item.imageUrl ?? "",
-        localLogoPath: item.localLogoPath ?? "",
+        logoImageUrl: item.logoImageUrl ?? "",
         latitude: item.latitude ?? 0,
         longitude: item.longitude ?? 0,
         description: item.description ?? "",
@@ -262,7 +262,7 @@ export function useStores(bookmarksUuid: string | null): UseStoresResult {
           username: body.username ?? "",
           fullName: body.fullName ?? "",
           imageUrl: body.imageUrl ?? "",
-          localLogoPath: body.localLogoPath ?? "",
+          logoImageUrl: body.logoImageUrl ?? "",
           latitude: body.latitude ?? 0,
           longitude: body.longitude ?? 0,
           description: body.description ?? "",

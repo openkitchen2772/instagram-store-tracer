@@ -9,7 +9,7 @@ class StoreDTO(BaseModel):
     username: str = ""
     fullName: str = ""
     imageUrl: str
-    localLogoPath: str = ""
+    logoImageUrl: str = ""
     latitude: float
     longitude: float
     description: str = ""
@@ -35,7 +35,7 @@ class StoreDTO(BaseModel):
             username=store.username,
             fullName=store.full_name,
             imageUrl=store.hd_profile_pic_url,
-            localLogoPath=store.local_logo_path,
+            logoImageUrl=store.logo_image_url,
             latitude=latitude,
             longitude=longitude,
             description=store.description,

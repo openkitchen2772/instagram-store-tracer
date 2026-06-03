@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -18,7 +19,9 @@ class Store(BaseModel):
     city_name: str = ""
     latitude: Any = ""
     longitude: Any = ""
-    local_logo_path: str = ""
+    logo_image_url: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def update_from_source_profile(self, source_profile: dict[str, Any]) -> None:
         hd_profile_pic_url_info = source_profile.get("hd_profile_pic_url_info")

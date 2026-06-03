@@ -16,6 +16,10 @@ class Settings(pydantic.BaseModel):
     MONGO_DB_CONNECTION_STRING: str
     MONGO_DB_NAME: str
     ALLOWED_CORS_ORIGINS: list[str]
+    SUPABASE_API_KEY: str
+    SUPABASE_PROJECT_URL: str
+    SUPABASE_STORAGE_BUCKET_NAME: str
+    SUPABASE_STORAGE_BUCKET_LOGO_PATH: str
     
 rapid_api_key = os.getenv("RAPIDAPI_KEY", "")
 if not rapid_api_key:
@@ -44,6 +48,22 @@ if not allowed_cors_origins:
 else:
     allowed_cors_origins_list = allowed_cors_origins.split(",")
 
+supabase_api_key = os.getenv("SUPABASE_ANON_API_KEY", "")
+if not supabase_api_key:
+    raise ValueError("Supabase api key is missing! Please set SUPABASE_ANON_API_KEY in .env or environment variables.")
+
+supabase_project_url = os.getenv("SUPABASE_PROJECT_URL", "")
+if not supabase_project_url:
+    raise ValueError("Supabase project url is missing! Please set SUPABASE_PROJECT_URL in .env or environment variables.")
+
+supabase_storage_bucket_name = os.getenv("SUPABASE_STORAGE_BUCKET_NAME", "")
+if not supabase_storage_bucket_name:
+    raise ValueError("Supabase storage bucket name is missing! Please set SUPABASE_STORAGE_BUCKET_NAME in .env or environment variables.")
+
+supabase_storage_bucket_logo_path = os.getenv("SUPABASE_STORAGE_BUCKET_LOGO_PATH", "")
+if not supabase_storage_bucket_logo_path:
+    raise ValueError("Supabase storage bucket logo path is missing! Please set SUPABASE_STORAGE_BUCKET_LOGO_PATH in .env or environment variables.")
+
 project_root = Path(__file__).resolve().parent.parent
 store_logos_folder_path = project_root / "store_logos"
 logs_folder_path = project_root / "logs"
@@ -59,5 +79,9 @@ settings = Settings(
     MONGO_DB_NAME=mongo_db_name,
     STORE_LOGOS_FOLDER_PATH=store_logos_folder_path,
     LOGS_FOLDER_PATH=logs_folder_path,
-    ALLOWED_CORS_ORIGINS=allowed_cors_origins_list
+    ALLOWED_CORS_ORIGINS=allowed_cors_origins_list,
+    SUPABASE_API_KEY=supabase_api_key,
+    SUPABASE_PROJECT_URL=supabase_project_url,
+    SUPABASE_STORAGE_BUCKET_NAME=supabase_storage_bucket_name,
+    SUPABASE_STORAGE_BUCKET_LOGO_PATH=supabase_storage_bucket_logo_path
 )
