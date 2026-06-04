@@ -17,10 +17,19 @@ class StoreSearch(pydantic.BaseModel):
         ),
     )
     addresses: list[str] = pydantic.Field(
-        description="此 IG 商店在香港各分店的文字地址陣列，請優先利用Instagram/Facebook/Threads店鋪頁面裡的資料，或是店鋪官方網站資料，請注意不要加入已結業的地址，再嘗試以網絡資料補充。",
+        description=(
+            "列出此 IG 商店在香港所有分店的文字地址陣列。"
+            "請先從 Instagram／Facebook／Threads 店鋪頁面或官方網站整理現有分店地址；"
+            "資料不足時再以網絡搜索補充。"
+            "如果懷疑但不能判斷是否已結業地址，請不要列出"
+        ),
     )
     google_places_search_prompt: str = pydantic.Field(
-        description="用於Google Places API做分店地址搜索的提示詞，請根據其instagram商鋪頁面描述，地區以及商鋪類型等給出一組提示詞，範例'香港 連鎖餐廳 港式快餐店 大快活'",
+        description=(
+            "用於 Google Places API 搜索香港分店的提示詞。"
+            "請根據 Instagram 商鋪各分店地址(先整理出地址)，透過業務類型, 以及列出所有其分店全寫地址的來填寫。"
+            "範例：'香港 意式雪糕 康城 旺角 觀塘 屯門 荔枝角 沙田 葵芳 銅鑼灣 GANTO GELATO'"
+        ),
     )
 
 
@@ -35,6 +44,8 @@ class StoreAIService:
         prompt = (
             f"請搜索香港 Instagram 商店 @{normalized_username} 的公開資料，"
             f"並根據 schema 填寫結果。username 必須是 {normalized_username}。"
+            f"請準確填寫 addresses 與 google_places_search_prompt；"
+            f"地圖經緯度將由 Google Places 另行搜索。"
             f" Instagram: https://www.instagram.com/{normalized_username}/"
         )
         result = self._client.generate_structured(prompt, StoreSearch)

@@ -189,13 +189,22 @@ export default function StoreListView({
                   Unable to load map settings. {settingsError}
                 </p>
               ) : (
-                <StoreLocationsMap
-                  className="mt-4"
-                  apiKey={googleMapsApiKey}
-                  locations={mapLocations}
-                  onLocationSelect={handleMapLocationSelect}
-                  isVisible={isMapVisible}
-                />
+                <>
+                  <StoreLocationsMap
+                    className="mt-4"
+                    apiKey={googleMapsApiKey}
+                    locations={mapLocations}
+                    onLocationSelect={handleMapLocationSelect}
+                    isVisible={isMapVisible}
+                  />
+                  <p className="mt-3 rounded-xl border border-amber-300/90 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 px-3 py-2.5 text-center text-xs font-semibold leading-relaxed text-amber-950 shadow-sm ring-1 ring-amber-200/60 sm:text-sm">
+                    <span className="text-base font-black text-amber-600 sm:text-lg">
+                      *
+                    </span>{" "}
+                    Map location markers are shown on a best-effort basis and
+                    may not include every store address listed in store details.
+                  </p>
+                </>
               )}
             </div>
           ) : null}
