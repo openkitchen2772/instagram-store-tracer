@@ -20,7 +20,7 @@ class Settings(pydantic.BaseModel):
     SUPABASE_PROJECT_URL: str
     SUPABASE_STORAGE_BUCKET_NAME: str
     SUPABASE_STORAGE_BUCKET_LOGO_PATH: str
-    
+    ENV: str
 rapid_api_key = os.getenv("RAPIDAPI_KEY", "")
 if not rapid_api_key:
     raise ValueError("Rapid API Key is missing! Please check if key is set in .env or environmental variables of platform settings.")
@@ -64,6 +64,8 @@ supabase_storage_bucket_logo_path = os.getenv("SUPABASE_STORAGE_BUCKET_LOGO_PATH
 if not supabase_storage_bucket_logo_path:
     raise ValueError("Supabase storage bucket logo path is missing! Please set SUPABASE_STORAGE_BUCKET_LOGO_PATH in .env or environment variables.")
 
+env = os.getenv("ENV", "dev").strip().strip('"').lower()
+
 project_root = Path(__file__).resolve().parent.parent
 store_logos_folder_path = project_root / "store_logos"
 logs_folder_path = project_root / "logs"
@@ -83,5 +85,6 @@ settings = Settings(
     SUPABASE_API_KEY=supabase_api_key,
     SUPABASE_PROJECT_URL=supabase_project_url,
     SUPABASE_STORAGE_BUCKET_NAME=supabase_storage_bucket_name,
-    SUPABASE_STORAGE_BUCKET_LOGO_PATH=supabase_storage_bucket_logo_path
+    SUPABASE_STORAGE_BUCKET_LOGO_PATH=supabase_storage_bucket_logo_path,
+    ENV=env,
 )

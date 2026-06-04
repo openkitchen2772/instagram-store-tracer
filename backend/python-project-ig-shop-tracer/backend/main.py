@@ -73,7 +73,14 @@ async def lifespan(application: FastAPI):
     yield
     close_mongo_connection()
 
-app = FastAPI(lifespan=lifespan)
+# Disable Swagger/ReDoc and OpenAPI schema in production.
+_is_production = settings.ENV == "prod"
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_CORS_ORIGINS,
