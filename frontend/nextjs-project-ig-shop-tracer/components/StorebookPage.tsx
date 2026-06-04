@@ -87,7 +87,15 @@ export default function StorebookPage({
       const matchesTags = item.tags.some((tag) =>
         tag.toLowerCase().includes(normalizedQuery),
       );
-      return matchesFullName || matchesUsername || matchesTags;
+      const matchesLocation = item.addresses.some((address) =>
+        address.toLowerCase().includes(normalizedQuery),
+      );
+      return (
+        matchesFullName ||
+        matchesUsername ||
+        matchesTags ||
+        matchesLocation
+      );
     });
   }, [searchQuery, stores]);
 

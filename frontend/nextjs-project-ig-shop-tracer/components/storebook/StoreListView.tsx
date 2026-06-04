@@ -140,7 +140,7 @@ export default function StoreListView({
 
       {showSearchNoResults ? (
         <p className="mt-6 rounded-2xl bg-zinc-50 px-4 py-6 text-center text-sm text-zinc-600 ring-1 ring-zinc-200">
-          No stores match your search. Try a different name.
+          No stores match your search. Try a different name, tag, or location.
         </p>
       ) : null}
 

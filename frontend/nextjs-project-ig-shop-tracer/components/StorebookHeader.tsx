@@ -70,8 +70,8 @@ export default function StorebookHeader({
           value={searchQuery}
           onChange={(event) => onSearchChange(event.target.value)}
           className="h-10 min-w-0 flex-1 rounded-full border border-zinc-300 bg-white px-3 text-sm text-zinc-800 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 sm:h-11 sm:px-4"
-          placeholder="Search store"
-          aria-label="Search stores"
+          placeholder="Search name, tag, or location"
+          aria-label="Search stores by name, tag, or location"
         />
         <button
           type="button"
