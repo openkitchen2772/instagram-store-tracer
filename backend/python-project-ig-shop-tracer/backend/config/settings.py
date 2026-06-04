@@ -11,6 +11,7 @@ class Settings(pydantic.BaseModel):
     RAPID_API_KEY: str
     GEMINI_API_KEY: str
     GEMINI_MODEL: str
+    GOOGLE_MAPS_API_KEY: str
     STORE_LOGOS_FOLDER_PATH: Path
     LOGS_FOLDER_PATH: Path
     MONGO_DB_CONNECTION_STRING: str
@@ -32,6 +33,12 @@ if not gemini_api_key:
 gemini_model = os.getenv("GEMINI_MODEL", "")
 if not gemini_model:
     raise ValueError("Gemini model is missing! Please set GEMINI_MODEL in .env or environment variables.")
+
+google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
+if not google_maps_api_key:
+    raise ValueError(
+        "Google Maps API key is missing! Please set GOOGLE_MAPS_API_KEY in .env or environment variables."
+    )
 
 mongo_connection_string = os.getenv("MONGO_DB_CONNECTION_STRING", "")
 if not mongo_connection_string:
@@ -77,6 +84,7 @@ settings = Settings(
     RAPID_API_KEY=rapid_api_key,
     GEMINI_API_KEY=gemini_api_key,
     GEMINI_MODEL=gemini_model,
+    GOOGLE_MAPS_API_KEY=google_maps_api_key,
     MONGO_DB_CONNECTION_STRING=mongo_connection_string,
     MONGO_DB_NAME=mongo_db_name,
     STORE_LOGOS_FOLDER_PATH=store_logos_folder_path,

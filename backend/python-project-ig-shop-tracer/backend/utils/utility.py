@@ -1,3 +1,6 @@
+from pathlib import Path
+from urllib.parse import urlparse
+
 def infer_logo_file_extension(image_url: str, content_type: str | None) -> str:
     if content_type:
         content_type_base = content_type.split(";")[0].strip().lower()

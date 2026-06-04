@@ -2,28 +2,26 @@ import pydantic
 from ai.providers.base import AIServiceClient
 
 
-class StoreLocation(pydantic.BaseModel):
-    """Branch coordinates for Gemini structured output (tuple types are unsupported)."""
-
-    latitude: float = pydantic.Field(description="分店緯度")
-    longitude: float = pydantic.Field(description="分店經度")
-
-
 class StoreSearch(pydantic.BaseModel):
-    username: str = pydantic.Field(description="商店IG頁面的Username")
-    description: str = pydantic.Field(description="一段對於這個IG商鋪與其業務商品的描述段落")
-    tags: list[str] = pydantic.Field(
-        description="一個關於這個IG商店的標籤陣列,將會用於商店的搜索和分類之用,例如:['麵包店','旺角','銅鑼灣','連鎖餐飲','連鎖零售','珍珠奶茶','本地品牌','手工麵包','酸種麵包','港式']",
+    username: str = pydantic.Field(
+        description="此 IG 商店的帳號 Username（不含 @）。",
     )
-    locations: list[StoreLocation] = pydantic.Field(
-        description="這個IG商店的在港各分店的經緯度地點,將用於google maps顯示位置,請透過網絡搜索結果,例如但不限於openrice或是Instagram或是官方網站,取得後請也嘗試以google maps驗證座標是否該店家,例如:[{'latitude':22.0934,'longitude':114.060349},{'latitude':22.443434,'longitude':114.343545}]",
+    description: str = pydantic.Field(
+        description="一段文字，描述此 IG 商鋪及其業務與商品。",
+    )
+    tags: list[str] = pydantic.Field(
+        description=(
+            "此 IG 商店的標籤陣列，供搜索與分類使用。"
+            "範例：['麵包店','旺角','銅鑼灣','連鎖餐飲','連鎖零售','珍珠奶茶',"
+            "'本地品牌','手工麵包','酸種麵包','港式']"
+        ),
     )
     addresses: list[str] = pydantic.Field(
-        description="一個關於此IG商店的香港各分店地址的陣列"
+        description="此 IG 商店在香港各分店的文字地址陣列，請優先利用Instagram/Facebook/Threads店鋪頁面裡的資料，或是店鋪官方網站資料，請注意不要加入已結業的地址，再嘗試以網絡資料補充。",
     )
-
-    def location_tuples(self) -> list[tuple[float, float]]:
-        return [(location.latitude, location.longitude) for location in self.locations]
+    google_places_search_prompt: str = pydantic.Field(
+        description="用於Google Places API做分店地址搜索的提示詞，請根據其instagram商鋪頁面描述，地區以及商鋪類型等給出一組提示詞，範例'香港 連鎖餐廳 港式快餐店 大快活'",
+    )
 
 
 class StoreAIService:
@@ -33,5 +31,12 @@ class StoreAIService:
         self._client = client
 
     def generate(self, username: str) -> StoreSearch:
-        prompt = f"請幫我搜索關於@{username}這個IG商店的資料並根據schema填充並返回結果."
-        return self._client.generate_structured(prompt, StoreSearch)
+        normalized_username = username.strip().lstrip("@")
+        prompt = (
+            f"請搜索香港 Instagram 商店 @{normalized_username} 的公開資料，"
+            f"並根據 schema 填寫結果。username 必須是 {normalized_username}。"
+            f" Instagram: https://www.instagram.com/{normalized_username}/"
+        )
+        result = self._client.generate_structured(prompt, StoreSearch)
+        # Keep caller username authoritative even if the model drifts.
+        return result.model_copy(update={"username": normalized_username})

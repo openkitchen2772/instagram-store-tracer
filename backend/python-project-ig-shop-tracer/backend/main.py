@@ -35,12 +35,14 @@ from services.store import (
     store_info_generation_task,
 )
 from api.rapid import request_rapid_api_profile
+from api.google_maps import GoogleMapsGeocodingClientConfig, GoogleMapsGeocodingService
 from api.supabase import SupabaseStorageClientConfig, SupabaseStorageService
 
 # Global env var
 RAPID_API_KEY = settings.RAPID_API_KEY
 GEMINI_API_KEY = settings.GEMINI_API_KEY
 GEMINI_MODEL = settings.GEMINI_MODEL
+GOOGLE_MAPS_API_KEY = settings.GOOGLE_MAPS_API_KEY
 STORE_LOGOS_FOLDER_PATH = settings.STORE_LOGOS_FOLDER_PATH
 LOGS_FOLDER_PATH = settings.LOGS_FOLDER_PATH
 
@@ -62,6 +64,11 @@ async def lifespan(application: FastAPI):
     )
     application.state.gemini_client = gemini_client
     application.state.store_ai_service = StoreAIService(gemini_client)
+    google_maps_geocoding_service = GoogleMapsGeocodingService(
+        GoogleMapsGeocodingClientConfig(api_key=GOOGLE_MAPS_API_KEY),
+        app_logger=logger,
+    )
+    application.state.google_maps_geocoding_service = google_maps_geocoding_service
     supabase_storage_service = SupabaseStorageService(SupabaseStorageClientConfig(
         api_key=settings.SUPABASE_API_KEY,
         project_url=settings.SUPABASE_PROJECT_URL,
@@ -93,7 +100,7 @@ app.add_middleware(
 @app.get("/settings", response_model=ClientSettings)
 async def get_client_settings() -> ClientSettings:
     return ClientSettings(
-        googleMapsApiKey=os.getenv("GOOGLE_MAPS_API_KEY", ""),
+        googleMapsApiKey=GOOGLE_MAPS_API_KEY,
     )
 
 
@@ -187,6 +194,7 @@ async def add_store_profile(
         ctx,
         background_tasks,
         app.state.gemini_client,
+        app.state.google_maps_geocoding_service,
         app.state.supabase_storage_service,
     )
 
@@ -265,7 +273,9 @@ async def delete_store_profile(payload: StoreDelete) -> ResponseBase[dict[str, s
     )
 
 
+# ######################
 # internal functions
+# ######################
 @dataclass(frozen=True)
 class _StoreUsernameRequestContext:
     trace_id: str
@@ -501,6 +511,7 @@ async def _create_store_and_bookmark(
     ctx: _AddStoreRequestContext,
     background_tasks: BackgroundTasks,
     gemini_client: GeminiService,
+    google_maps_client: GoogleMapsGeocodingService,
     supabase_storage_service: SupabaseStorageService,
 ) -> ResponseBase[Store]:
     # insert a new store document or update existing one
@@ -543,7 +554,12 @@ async def _create_store_and_bookmark(
         )
 
     # run in background to ensure long round trip api operations when not be interrupted
-    background_tasks.add_task(store_info_generation_task, gemini_client, ctx.page_name)
+    background_tasks.add_task(
+        store_info_generation_task,
+        gemini_client,
+        google_maps_client,
+        ctx.page_name,
+    )
     background_tasks.add_task(
         fetch_and_upload_store_logo_background_task,
         mapped_profile.id,
@@ -583,7 +599,12 @@ async def ai_generate_store_info(
             message="Store AI generate rejected: username is required. Provide a valid Instagram username and try again.",
         )
 
-    background_tasks.add_task(store_info_generation_task, app.state.gemini_client, page_name)
+    background_tasks.add_task(
+        store_info_generation_task,
+        app.state.gemini_client,
+        app.state.google_maps_geocoding_service,
+        page_name,
+    )
     return ResponseBase[StoreDTO](
         payload=response_payload,
         success=True,

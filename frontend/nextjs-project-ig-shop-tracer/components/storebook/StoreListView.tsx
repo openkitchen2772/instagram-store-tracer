@@ -133,7 +133,7 @@ export default function StoreListView({
           <p className="relative mt-3 break-words text-sm font-medium text-zinc-600 sm:text-base">
             Tap the{" "}
             <span className="font-semibold text-zinc-800">+</span> button to add
-            your first Instagram shop.
+            your first Instagram store.
           </p>
         </div>
       ) : null}

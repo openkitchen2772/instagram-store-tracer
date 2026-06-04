@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from storage3.exceptions import StorageException
 
+from api.google_maps import GoogleMapsGeocodingService
 from api.supabase import SupabaseStorageService
 from models.collections import CollectionName
 from models.store import Store
@@ -20,7 +21,7 @@ from utils.logger import logger
 from utils.utility import infer_logo_file_extension
 from config.settings import settings
 from ai.services.store import StoreAIService
-from ai.providers.gemini import GeminiService
+from ai.providers.gemini import GeminiGenerationError, GeminiService
 
 
 def _utc_now() -> datetime:
@@ -122,8 +123,12 @@ def map_store_from_rapid_api_result(result: dict[str, Any]) -> Store:
     return mapped_profile
 
 
-def store_info_generation_task(gemini_client: GeminiService, username: str) -> None:
-    """Generate store AI data via Gemini, then upsert results into MongoDB."""
+def store_info_generation_task(
+    gemini_client: GeminiService,
+    google_maps_client: GoogleMapsGeocodingService,
+    username: str,
+) -> None:
+    """Generate store AI data via Gemini, geocode addresses, then upsert into MongoDB."""
     trace_id = str(uuid4())
     mongo_db = get_mongo_db()
     store_ai_service: StoreAIService = StoreAIService(gemini_client)
@@ -159,6 +164,17 @@ def store_info_generation_task(gemini_client: GeminiService, username: str) -> N
 
     try:
         ai_result = store_ai_service.generate(username)
+    except GeminiGenerationError as error:
+        total_elapsed_ms = (perf_counter() - job_started_at) * 1000
+        logger.warning(
+            "[trace_id=%s] Store AI background job failed during Gemini call for username '%s' in %.2f ms: %s | diagnostics=%s",
+            trace_id,
+            username,
+            total_elapsed_ms,
+            error,
+            error.diagnostics,
+        )
+        return
     except Exception as error:
         total_elapsed_ms = (perf_counter() - job_started_at) * 1000
         logger.warning(
@@ -170,11 +186,20 @@ def store_info_generation_task(gemini_client: GeminiService, username: str) -> N
         )
         return
 
+    store_locations = google_maps_client.geocode_addresses(ai_result.addresses)
+    logger.info(
+        "[trace_id=%s] Store AI geocoding for username '%s': resolved %s location(s) from %s address(es).",
+        trace_id,
+        username,
+        len(store_locations),
+        len(ai_result.addresses),
+    )
+
     saved_store, was_created, error_message, mongo_object_id = upsert_store_from_ai_data(
         username=username,
         description=ai_result.description,
         tags=ai_result.tags,
-        store_locations=ai_result.location_tuples(),
+        store_locations=store_locations,
         addresses=ai_result.addresses,
         logger=logger,
     )
