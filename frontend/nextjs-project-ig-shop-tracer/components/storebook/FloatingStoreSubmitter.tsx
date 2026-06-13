@@ -142,7 +142,7 @@ export default function FloatingStoreSubmitter({
               placeholder={
                 isSubmitting
                   ? "Processing submission..."
-                  : "Store username, e.g. skewer.kitche / wanpotea.hk"
+                  : "Submit Instagram store name..."
               }
               aria-label="Instagram store name"
               disabled={isSubmitting}
