@@ -19,8 +19,9 @@ class StoreSearch(pydantic.BaseModel):
     addresses: list[str] = pydantic.Field(
         description=(
             "列出此 IG 商店在香港所有分店的文字地址陣列。"
-            "請先從 Instagram／Facebook／Threads 店鋪頁面或官方網站整理現有分店地址；"
-            "請透過搜索確認地址是否已搬遷或者結業，如果懷疑已搬遷結業，或是不能判斷是否已結業地址，請避免列出。"
+            "請先從 Instagram, Facebook, Threads店鋪頁面或其官方網站整理現有分店地址；"
+            "請透過從Openrice,Instagram專頁以及Facebook專頁搜索商鋪名稱, 確認地址是否已搬遷或者結業，如果已搬遷結業就不要列出；"
+            "如果搜索後懷疑為已結業或搬遷的地址，則在地址尾端附上'(或已結業)'。"
         ),
     )
     google_places_search_prompt: str = pydantic.Field(

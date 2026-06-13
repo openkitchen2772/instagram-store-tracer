@@ -104,7 +104,7 @@ export default function StoreListView({
       ) : null}
       {error ? (
         <p className="mt-3 break-words rounded-2xl bg-red-50 px-4 py-6 text-sm text-red-700 ring-1 ring-red-200">
-          Unable to load stores. {error}
+          {error}
         </p>
       ) : null}
 

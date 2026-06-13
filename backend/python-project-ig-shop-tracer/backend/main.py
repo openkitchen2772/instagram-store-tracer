@@ -390,16 +390,18 @@ async def _fetch_store_from_rapid_api(
     result, error_message = await request_rapid_api_profile(ctx.page_name, trace_id=ctx.trace_id)
     if result is None:
         logger.warning(
-            "[trace_id=%s] %s request failed during profile lookup for username '%s' in %.2f ms.",
+            "[trace_id=%s] %s request failed during profile lookup for username '%s' in %.2f ms, error: %s",
             ctx.trace_id,
             request_label,
             ctx.page_name,
             ctx.elapsed_ms(),
+            error_message
         )
+
         return None, ResponseBase[Store](
             payload=ctx.response_payload,
             success=False,
-            message=error_message or "Instagram store lookup failed: unknown error.",
+            message="Failed to fetch store, please make sure the username (at the end of your Instagram store URL) is correct.",
         )
 
     mapped_profile = map_store_from_rapid_api_result(result)
